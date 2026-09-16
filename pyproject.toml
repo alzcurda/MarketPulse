@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "marketpulse"
+version = "0.1.0"
+description = "Buscador y comparador inteligente de productos online para el mercado español con filtrado ético y selección de tiendas"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "MarketPulse Team"}
+]
+dependencies = [
+    "rich>=13.7.0",
+    "pydantic>=2.6.0",
+    "httpx>=0.27.0",
+    "beautifulsoup4>=4.12.3",
+    "playwright>=1.42.0",
+    "python-dotenv>=1.0.1"
+]
+
+[project.scripts]
+marketpulse = "marketpulse.cli:main"

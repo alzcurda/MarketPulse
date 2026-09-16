@@ -1,0 +1,103 @@
+import re
+from typing import List
+from marketpulse.models import ProductResult, SearchCriteria
+
+
+class Aggregator:
+    """
+    Agregador y motor de ranking.
+    Recibe los resultados de las tiendas consultadas, filtra por restricciones,
+    calcula la puntuación de afinidad y ordena los productos para la comparativa.
+    """
+
+    def calculate_match_score(self, product: ProductResult, criteria: SearchCriteria) -> float:
+        """
+        Calcula una puntuación de afinidad (0 a 100) en base a la coincidencia con
+        las especificaciones deseadas y el término de búsqueda.
+        """
+        score = 50.0
+        title_lower = product.title.lower()
+        matched_specs = []
+
+        # 1. Coincidencia con palabras de la búsqueda limpia
+        query_words = criteria.clean_query.lower().split()
+        for word in query_words:
+            if len(word) > 2 and word in title_lower:
+                score += (25.0 / max(len(query_words), 1))
+
+        # 2. Coincidencia con especificaciones técnicas clave
+        for spec in criteria.key_specs:
+            spec_clean = spec.lower().replace(" ", "")
+            if spec.lower() in title_lower or spec_clean in title_lower.replace(" ", ""):
+                score += 15.0
+                matched_specs.append(spec)
+
+        product.matched_specs = matched_specs
+
+        # 3. Bonus por descuento activo
+        if product.discount_percentage and product.discount_percentage > 5:
+            score += min(product.discount_percentage * 0.5, 10.0)
+
+        # 4. Comprobación de presupuesto
+        if criteria.max_price and product.price > criteria.max_price:
+            score -= 30.0
+
+        return max(0.0, min(100.0, round(score, 1)))
+
+    def filter_and_rank(self, raw_results: List[ProductResult], criteria: SearchCriteria) -> List[ProductResult]:
+        """
+        Aplica filtros y ordena los resultados de múltiples tiendas.
+        """
+        filtered: List[ProductResult] = []
+        seen_urls = set()
+
+        # Palabras de descarte habituales si buscamos equipos completos (evita accesorios que saturan búsquedas)
+        accessory_words = ["funda", "cable", "adaptador", "pegatina", "vinilo", "protector"]
+
+        for prod in raw_results:
+            # Deduplicación por URL
+            if prod.url in seen_urls:
+                continue
+            seen_urls.add(prod.url)
+
+            title_lower = prod.title.lower()
+
+            # Filtrar accesorios si no se pidieron explícitamente
+            if not any(acc in criteria.clean_query.lower() for acc in accessory_words):
+                if any(re.search(rf"\b{acc}\b", title_lower) for acc in accessory_words):
+                    continue
+
+            # Filtro de palabras excluidas
+            if any(ex.lower() in title_lower for ex in criteria.exclude_keywords):
+                continue
+
+            # Filtro de stock
+            if criteria.in_stock_only and not prod.in_stock:
+                continue
+
+            # Filtro de envío local
+            if criteria.ships_from_spain_only and not prod.ships_from_spain:
+                continue
+
+            # Filtro de precio máximo
+            if criteria.max_price and prod.price > criteria.max_price:
+                continue
+
+            # Filtro de precio mínimo
+            if criteria.min_price and prod.price < criteria.min_price:
+                continue
+
+            # Calcular score
+            prod.match_score = self.calculate_match_score(prod, criteria)
+            filtered.append(prod)
+
+        # Ordenación
+        if criteria.sort_by == "price_asc":
+            filtered.sort(key=lambda p: p.price)
+        elif criteria.sort_by == "price_desc":
+            filtered.sort(key=lambda p: p.price, reverse=True)
+        else:
+            # Por defecto: relevancia (match_score descendente, y luego precio ascendente)
+            filtered.sort(key=lambda p: (-p.match_score, p.price))
+
+        return filtered
