@@ -17,6 +17,7 @@ class CriteriaAdvisor:
             "portatil", "portátil", "laptop", "notebook", "macbook", "ultrabook", "thinkpad"
         ],
         ProductCategory.PC_COMPONENTS: [
+            "mini pc", "minipc", "barebone", "sobremesa", "ordenador",
             "tarjeta grafica", "gráfica", "gpu", "procesador", "cpu", "placa base", "motherboard",
             "memoria ram", "disco duro", "ssd", "fuente de alimentacion", "caja pc", "refrigeracion"
         ],

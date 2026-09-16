@@ -36,7 +36,7 @@ class StoreRouter:
             "shipping_info": "Almacenes locales en España (sin aduanas ni aranceles)",
             "estimated_delivery_days": "3 - 5 días hábiles",
             "trust_score": 8.2,
-            "strengths": [ProductCategory.AUDIO, ProductCategory.GENERAL_TECH, ProductCategory.GAMING],
+            "strengths": [ProductCategory.AUDIO, ProductCategory.GENERAL_TECH, ProductCategory.GAMING, ProductCategory.PC_COMPONENTS],
         }
     }
 

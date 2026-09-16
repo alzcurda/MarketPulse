@@ -1,4 +1,12 @@
 import sys
+
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+        sys.stderr.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
 from typing import Dict, List, Type
 from rich.console import Console
 from rich.panel import Panel
@@ -86,11 +94,11 @@ def run_interactive_session():
     rec_table.add_column("Tienda", style="bold white", width=22)
     rec_table.add_column("Motivo / Especialidad", width=38)
     rec_table.add_column("Envío estimado", style="green", width=20)
-    rec_table.add_column("Activa", justify="center", width=8)
+    rec_table.add_column("Sugerida", justify="center", width=12)
 
     selected_store_ids = []
     for idx, rec in enumerate(recommendations, 1):
-        status_mark = "[bold green]SÍ[/bold green]" if rec.enabled_by_default else "[dim]NO[/dim]"
+        status_mark = "[bold green]SÍ[/bold green]" if rec.enabled_by_default else "[yellow]OPCIONAL[/yellow]"
         if rec.enabled_by_default:
             selected_store_ids.append(rec.store_id)
         rec_table.add_row(
@@ -102,11 +110,13 @@ def run_interactive_session():
         )
 
     console.print(rec_table)
+    console.print("[dim]Todas las tiendas están 100% configuradas. Las sugeridas son las de mayor catálogo en esta categoría.[/dim]")
 
-    confirm_stores = Confirm.ask("¿Quieres buscar en estas tiendas seleccionadas?", default=True)
+    confirm_stores = Confirm.ask("¿Quieres buscar en las tiendas sugeridas? (o pulsa 'n' para elegir manualmente / todas)", default=True)
     if not confirm_stores:
-        console.print("[cyan]Introduce los números de las tiendas a consultar separados por comas (ej: 1,2):[/cyan]")
-        choices = Prompt.ask("Opciones", default="1,2")
+        all_nums = ",".join(str(i) for i in range(1, len(recommendations) + 1))
+        console.print(f"[cyan]Introduce los números de las tiendas a consultar (ej: {all_nums} para buscar en todas):[/cyan]")
+        choices = Prompt.ask("Opciones", default=all_nums)
         selected_store_ids = []
         for c in choices.split(","):
             c = c.strip()
@@ -146,24 +156,42 @@ def run_interactive_session():
         return
 
     res_table = Table(show_header=True, header_style="bold magenta", expand=True)
-    res_table.add_column("Tienda", style="bold cyan", width=18)
-    res_table.add_column("Producto", style="white", min_width=30)
+    res_table.add_column("#", justify="right", style="dim", width=4)
+    res_table.add_column("Tienda", style="bold cyan", width=16)
+    res_table.add_column("Producto", style="white", min_width=25)
     res_table.add_column("Precio", justify="right", style="bold yellow", width=12)
     res_table.add_column("Afinidad", justify="center", style="green", width=10)
-    res_table.add_column("Enlace Directo", style="underline blue")
+    res_table.add_column("Enlace Directo", justify="center", style="underline blue", width=18)
 
-    for prod in ranked_results:
+    for idx, prod in enumerate(ranked_results, 1):
         price_str = f"{prod.price:,.2f} €" if prod.price > 0 else "Ver en tienda"
         score_str = f"{int(prod.match_score)}%" if prod.match_score > 0 else "-"
+        link_str = f"[link={prod.url}]Abrir enlace ↗[/link]"
         res_table.add_row(
+            str(idx),
             prod.store_name,
             prod.title[:65] + ("..." if len(prod.title) > 65 else ""),
             price_str,
             score_str,
-            prod.url
+            link_str
         )
 
     console.print(res_table)
+
+    # Bloque de enlaces completos sin recorte para copiar/pegar directamente
+    links_lines = []
+    for idx, prod in enumerate(ranked_results, 1):
+        links_lines.append(
+            f"[bold cyan][{idx}][/bold cyan] [bold white]{prod.store_name}[/bold white] - {prod.title[:60]}:\n   [underline blue]{prod.url}[/underline blue]"
+        )
+
+    links_panel = Panel(
+        "\n\n".join(links_lines),
+        title="[bold green]Enlaces directos completos (para copiar o abrir)[/bold green]",
+        border_style="green",
+        expand=True
+    )
+    console.print("\n", links_panel)
     console.print(f"\n[dim]Se han comparado {len(ranked_results)} ofertas con envío garantizado a España.[/dim]\n")
 
 

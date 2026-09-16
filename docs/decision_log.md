@@ -127,4 +127,19 @@ Este documento registra todas las decisiones estratégicas, arquitectónicas y t
 * **Consecuencias:**
   Garantía absoluta de que ningún equipo que incumpla cualquiera de los requisitos (procesador, generación, memoria, disco o precio) pase el filtro hacia la comparativa final.
 
+---
+
+### ADR-0009: Presentación de enlaces directos no truncados y soporte de codificación UTF-8 en CLI
+* **Fecha:** 2026-09-16
+* **Estado:** Aprobado
+* **Contexto:**
+  Las URLs directas de productos de comercio electrónico suelen superar los 100 caracteres sin espacios intermedios. En la salida formateada por `Rich.Table`, las celdas de tabla recortaban las URLs con elipsis (`…`) para ajustarse al ancho de la terminal, impidiendo copiar la dirección completa. Asimismo, en terminales Windows configuradas por defecto en `cp1252`, caracteres especiales provocaban excepciones silenciosas que cortaban la renderización antes de finalizar.
+* **Decisión:**
+  1. Configurar `sys.stdout.reconfigure(encoding='utf-8')` y `sys.stderr.reconfigure(encoding='utf-8')` al inicio de la CLI en plataformas Windows.
+  2. Implementar enlaces hipertexto estándar OSC 8 (`[link={url}]Abrir enlace ↗[/link]`) dentro de la tabla comparativa de `Rich`, permitiendo al usuario abrir el producto directamente con Ctrl+Click desde terminales modernas.
+  3. Añadir inmediatamente tras la tabla un panel dedicado (`Panel`) con la lista completa y numerada de URLs directas en texto continuo, garantizando que el usuario pueda copiar y pegar cualquier enlace completo sin cortes ni elipsis.
+* **Consecuencias:**
+  Salida de consola robusta, sin cortes de ejecución en Windows, y accesibilidad total a los enlaces directos tanto mediante clic interactivo como mediante selección y copia en el portapapeles.
+
+
 

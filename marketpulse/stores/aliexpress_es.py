@@ -56,60 +56,60 @@ class AliExpressEsProvider(BaseStoreProvider):
                     continue
                 seen_items.add(item_id)
 
-            # Localizar el contenedor de la tarjeta de producto
-            card = a
-            for _ in range(6):
-                if card.parent and card.parent.name in ["div", "li"]:
-                    card = card.parent
-                    if "€" in card.get_text():
-                        break
+                # Localizar el contenedor de la tarjeta de producto
+                card = a
+                for _ in range(6):
+                    if card.parent and card.parent.name in ["div", "li"]:
+                        card = card.parent
+                        if "€" in card.get_text():
+                            break
 
-            # Título del artículo
-            title = ""
-            h_elem = card.find(["h1", "h2", "h3"])
-            if h_elem:
-                title = h_elem.get_text(strip=True)
-            if not title or len(title) < 10:
-                img = card.find("img", alt=True)
-                if img and len(img["alt"]) > 10:
-                    title = img["alt"]
-                else:
-                    title = a.get_text(strip=True)
+                # Título del artículo
+                title = ""
+                h_elem = card.find(["h1", "h2", "h3"])
+                if h_elem:
+                    title = h_elem.get_text(strip=True)
+                if not title or len(title) < 10:
+                    img = card.find("img", alt=True)
+                    if img and len(img.get("alt", "")) > 10:
+                        title = img["alt"]
+                    else:
+                        title = a.get_text(strip=True)
 
-            if not title:
-                continue
+                if not title:
+                    continue
 
-            # Extracción de precio en euros
-            price = 0.0
-            price_spans = card.select("[class*='price'], [class*='Price']")
-            if price_spans:
-                p_text = price_spans[0].get_text(strip=True)
-                m_p = re.search(r"(\d+[\.,]\d{2})", p_text)
-                if m_p:
-                    price = float(m_p.group(1).replace(".", "").replace(",", "."))
-
-            if price == 0.0:
-                card_text = card.get_text(separator=" ")
-                m_p = re.search(r"(\d+[\.,]\d{2})\s*€", card_text) or re.search(r"€\s*(\d+[\.,]\d{2})", card_text)
-                if m_p:
-                    try:
+                # Extracción de precio en euros
+                price = 0.0
+                price_spans = card.select("[class*='price'], [class*='Price']")
+                if price_spans:
+                    p_text = price_spans[0].get_text(strip=True)
+                    m_p = re.search(r"(\d+[\.,]\d{2})", p_text)
+                    if m_p:
                         price = float(m_p.group(1).replace(".", "").replace(",", "."))
-                    except ValueError:
-                        price = 0.0
 
-            # URL directa al artículo individual
-            direct_url = f"{self.base_url}/item/{item_id}.html"
+                if price == 0.0:
+                    card_text = card.get_text(separator=" ")
+                    m_p = re.search(r"(\d+[\.,]\d{2})\s*€", card_text) or re.search(r"€\s*(\d+[\.,]\d{2})", card_text)
+                    if m_p:
+                        try:
+                            price = float(m_p.group(1).replace(".", "").replace(",", "."))
+                        except ValueError:
+                            price = 0.0
 
-            results.append(
-                ProductResult(
-                    title=title,
-                    price=price,
-                    store_name=self.store_name,
-                    url=direct_url,
-                    in_stock=True,
-                    ships_from_spain=True,
+                # URL directa al artículo individual
+                direct_url = f"{self.base_url}/item/{item_id}.html"
+
+                results.append(
+                    ProductResult(
+                        title=title,
+                        price=price,
+                        store_name=self.store_name,
+                        url=direct_url,
+                        in_stock=True,
+                        ships_from_spain=True,
+                    )
                 )
-            )
 
         return results
 

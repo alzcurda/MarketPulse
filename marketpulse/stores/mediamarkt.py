@@ -56,10 +56,11 @@ class MediaMarktProvider(BaseStoreProvider):
 
                 price = 0.0
                 card_text = card.get_text(separator=" ")
-                m_p = re.search(r"(\d+[\.,]\d{2})\s*€", card_text) or re.search(r"€\s*(\d+[\.,]\d{2})", card_text)
+                m_p = re.search(r"(\d+(?:[\.,]\d{2})?)\s*€", card_text) or re.search(r"€\s*(\d+(?:[\.,]\d{2})?)", card_text)
                 if m_p:
                     try:
-                        price = float(m_p.group(1).replace(".", "").replace(",", "."))
+                        raw_p = m_p.group(1).replace(".", "").replace(",", ".")
+                        price = float(raw_p)
                     except ValueError:
                         price = 0.0
 
@@ -95,8 +96,13 @@ class MediaMarktProvider(BaseStoreProvider):
                             seen_urls.add(href)
                             title = a_elem.get_text(strip=True)
                             snippet = snippets[i].get_text(strip=True) if i < len(snippets) else ""
-                            m_p = re.search(r"(\d+[\.,]\d{2})\s*€", snippet)
-                            price = float(m_p.group(1).replace(".", "").replace(",", ".")) if m_p else 0.0
+                            m_p = re.search(r"(\d+(?:[\.,]\d{2})?)\s*€", snippet) or re.search(r"€\s*(\d+(?:[\.,]\d{2})?)", snippet)
+                            price = 0.0
+                            if m_p:
+                                try:
+                                    price = float(m_p.group(1).replace(".", "").replace(",", "."))
+                                except ValueError:
+                                    price = 0.0
                             results.append(
                                 ProductResult(
                                     title=title,
