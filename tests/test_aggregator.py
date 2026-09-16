@@ -77,6 +77,34 @@ class TestAggregator(unittest.TestCase):
         self.assertEqual(len(filtered), 1)
         self.assertEqual(filtered[0].title, "Portátil Asus VivoBook 16GB RAM")
 
+    def test_discard_search_urls_and_placeholders(self):
+        # Enlaces de búsqueda genéricos o con placeholders no deben considerarse productos
+        products = [
+            ProductResult(
+                title="Resultados Amazon.es para 'portatil'",
+                price=800.0,
+                store_name="Amazon España",
+                url="https://www.amazon.es/s?k=portatil"
+            ),
+            ProductResult(
+                title="[Acceso directo Plaza ES] AliExpress España para: 'portatil'",
+                price=800.0,
+                store_name="AliExpress Plaza (España)",
+                url="https://es.aliexpress.com/w/wholesale-portatil.html?shipFromCountry=ES"
+            ),
+            ProductResult(
+                title="Portátil Real Lenovo IdeaPad 16GB RAM",
+                price=549.0,
+                store_name="Amazon España",
+                url="https://www.amazon.es/dp/B0XYZ12345"
+            )
+        ]
+
+        filtered = self.aggregator.filter_and_rank(products, self.criteria)
+        self.assertEqual(len(filtered), 1)
+        self.assertEqual(filtered[0].url, "https://www.amazon.es/dp/B0XYZ12345")
+        self.assertEqual(filtered[0].title, "Portátil Real Lenovo IdeaPad 16GB RAM")
+
 
 if __name__ == "__main__":
     unittest.main()

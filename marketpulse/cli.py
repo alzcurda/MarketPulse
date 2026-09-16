@@ -167,12 +167,17 @@ def run_interactive_session():
     console.print(f"\n[dim]Se han comparado {len(ranked_results)} ofertas con envío garantizado a España.[/dim]\n")
 
 
+from marketpulse.core.browser import BrowserSession
+
+
 def main():
     try:
         run_interactive_session()
     except KeyboardInterrupt:
         console.print("\n[yellow]Operación cancelada por el usuario.[/yellow]")
         sys.exit(0)
+    finally:
+        BrowserSession.close()
 
 
 if __name__ == "__main__":

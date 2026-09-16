@@ -60,6 +60,13 @@ class Aggregator:
                 continue
             seen_urls.add(prod.url)
 
+            # Descartar enlaces que apunten a páginas de búsqueda o títulos ficticios
+            url_lower = prod.url.lower()
+            if any(p in url_lower for p in ["/s?k=", "/w/wholesale-", "/buscar/?query=", "/search.html?query="]):
+                continue
+            if prod.title.startswith("Resultados ") or prod.title.startswith("[Acceso directo"):
+                continue
+
             title_lower = prod.title.lower()
 
             # Filtrar accesorios si no se pidieron explícitamente

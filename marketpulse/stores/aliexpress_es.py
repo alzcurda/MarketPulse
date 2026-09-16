@@ -1,5 +1,7 @@
+import re
 import urllib.parse
 from typing import List
+from bs4 import BeautifulSoup
 from marketpulse.models import ProductResult, SearchCriteria
 from marketpulse.stores.base import BaseStoreProvider
 
@@ -7,7 +9,7 @@ from marketpulse.stores.base import BaseStoreProvider
 class AliExpressEsProvider(BaseStoreProvider):
     """
     Conector para AliExpress con filtro estricto de envío desde España (Plaza).
-    Garantiza entrega en 3 a 5 días y ausencia de impuestos/aduanas sorpresa.
+    Garantiza entrega rápida y ausencia de impuestos/aduanas sorpresa.
     """
 
     store_id = "aliexpress_es"
@@ -26,14 +28,81 @@ class AliExpressEsProvider(BaseStoreProvider):
 
     def search(self, criteria: SearchCriteria) -> List[ProductResult]:
         search_url = self.build_search_url(criteria)
-        return [
-            ProductResult(
-                title=f"[Acceso directo Plaza ES] AliExpress España para: '{criteria.clean_query}' (Envío local)",
-                price=criteria.max_price or 0.0,
-                store_name=self.store_name,
-                url=search_url,
-                in_stock=True,
-                ships_from_spain=True,
-                match_score=80.0
+        html = self.get_browser_html(search_url, wait_timeout_ms=3000)
+
+        results: List[ProductResult] = []
+        if not html:
+            return []
+
+        soup = BeautifulSoup(html, "html.parser")
+        # Enlaces a artículos de AliExpress con patrón /item/{id}.html
+        links = soup.find_all("a", href=re.compile(r"/item/(\d+)\.html"))
+        seen_items = set()
+
+        for a in links:
+            href = a.get("href", "")
+            m = re.search(r"/item/(\d+)\.html", href)
+            if not m:
+                continue
+            item_id = m.group(1)
+            if item_id in seen_items:
+                continue
+            seen_items.add(item_id)
+
+            # Localizar el contenedor de la tarjeta de producto
+            card = a
+            for _ in range(6):
+                if card.parent and card.parent.name in ["div", "li"]:
+                    card = card.parent
+                    if "€" in card.get_text():
+                        break
+
+            # Título del artículo
+            title = ""
+            h_elem = card.find(["h1", "h2", "h3"])
+            if h_elem:
+                title = h_elem.get_text(strip=True)
+            if not title or len(title) < 10:
+                img = card.find("img", alt=True)
+                if img and len(img["alt"]) > 10:
+                    title = img["alt"]
+                else:
+                    title = a.get_text(strip=True)
+
+            if not title:
+                continue
+
+            # Extracción de precio en euros
+            price = 0.0
+            price_spans = card.select("[class*='price'], [class*='Price']")
+            if price_spans:
+                p_text = price_spans[0].get_text(strip=True)
+                m_p = re.search(r"(\d+[\.,]\d{2})", p_text)
+                if m_p:
+                    price = float(m_p.group(1).replace(".", "").replace(",", "."))
+
+            if price == 0.0:
+                card_text = card.get_text(separator=" ")
+                m_p = re.search(r"(\d+[\.,]\d{2})\s*€", card_text) or re.search(r"€\s*(\d+[\.,]\d{2})", card_text)
+                if m_p:
+                    try:
+                        price = float(m_p.group(1).replace(".", "").replace(",", "."))
+                    except ValueError:
+                        price = 0.0
+
+            # URL directa al artículo individual
+            direct_url = f"{self.base_url}/item/{item_id}.html"
+
+            results.append(
+                ProductResult(
+                    title=title,
+                    price=price,
+                    store_name=self.store_name,
+                    url=direct_url,
+                    in_stock=True,
+                    ships_from_spain=True,
+                )
             )
-        ]
+
+        return results
+

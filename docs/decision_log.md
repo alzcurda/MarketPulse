@@ -12,6 +12,7 @@ Este documento registra todas las decisiones estratégicas, arquitectónicas y t
 4. [ADR-0004: Arquitectura desacoplada y modular (Advisor, Router, Providers, Aggregator)](#adr-0004-arquitectura-desacoplada-y-modular-advisor-router-providers-aggregator)
 5. [ADR-0005: Especialización en el mercado español y envíos locales](#adr-0005-especialización-en-el-mercado-español-y-envíos-locales)
 6. [ADR-0006: Registro estructurado de decisiones en repositorio (`docs/`)](#adr-0006-registro-estructurado-de-decisiones-en-repositorio-docs)
+7. [ADR-0007: Extracción directa de artículos individuales y eliminación de enlaces sustitutivos de búsqueda](#adr-0007-extracción-directa-de-artículos-individuales-y-eliminación-de-enlaces-sustitutivos-de-búsqueda)
 
 ---
 
@@ -90,3 +91,19 @@ Este documento registra todas las decisiones estratégicas, arquitectónicas y t
   Mantener una carpeta `docs/` con `decision_log.md` (registro cronológico de decisiones) y `architecture.md` (diagrama y descripción detallada del sistema). Cada cambio relevante en requerimientos o diseño deberá registrarse aquí.
 * **Consecuencias:**
   Total auditabilidad y facilidad para que nuevos colaboradores o el propio usuario retomen el proyecto en cualquier momento.
+
+---
+
+### ADR-0007: Extracción directa de artículos individuales y eliminación de enlaces sustitutivos de búsqueda
+* **Fecha:** 2026-09-16
+* **Estado:** Aprobado
+* **Contexto:**
+  Las peticiones HTTP estáticas a plataformas como Amazon.es y AliExpress Plaza se encontraban con retos WAF/antibot (Akamai, Cloudflare), lo que provocaba que los proveedores retornaran la URL del listado de búsqueda (`/s?k=...` o `/w/wholesale-...`) simulando ser un artículo ficticio. El usuario requiere exclusivamente URLs directas a los artículos concretos que cumplen los criterios de compra.
+* **Decisión:**
+  1. Integrar un gestor de navegador headless con Playwright (`BrowserSession`) que ejecute JavaScript, renderice el DOM completo y resuelva las defensas cliente.
+  2. Implementar extracción directa de tarjetas de producto: en Amazon.es mediante ASIN (`/dp/{asin}`), en AliExpress Plaza mediante identificador de artículo (`/item/{id}.html`), y en PcComponentes y MediaMarkt con extracción de rutas directas.
+  3. Eliminar por completo los registros de sustitución (*fallback placeholders*) que devolvían URLs de búsqueda como productos.
+  4. Introducir en `Aggregator` una regla de descarte explícita que bloquea cualquier URL de listado de búsqueda que pudiera filtrarse.
+* **Consecuencias:**
+  Los resultados de la tabla comparativa contienen únicamente productos reales con precios actualizados, enlaces directos de compra y puntuación de afinidad.
+

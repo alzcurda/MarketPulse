@@ -117,9 +117,11 @@ class CriteriaAdvisor:
         patterns = [
             r"\b(RTX\s*\d{4}(?:\s*TI)?)\b",
             r"\b(GTX\s*\d{4})\b",
-            r"\b(RYZEN\s*\d)\b",
+            r"\b(RYZEN\s*\d(?:\s*\d{4}[A-Z]*)?)\b",
             r"\b(I[3579]-?\d{4,5}[A-Z]*)\b",
             r"\b(I[3579])\b",
+            r"\b(INTEL\s*N\d{2,3})\b",
+            r"\b(N\d{2,3})\b",
             r"\b(OLED|AMOLED|IPS)\b",
             r"\b(\d{2,3}\s*HZ)\b",
             r"\b(1TB|512GB|256GB|2TB)\s*(?:SSD)?\b",
@@ -148,6 +150,9 @@ class CriteriaAdvisor:
         # Normalizar tildes para evitar discrepancias de codificación o formato
         text_normalized = self.strip_accents(text.lower())
 
+        # Limpiar referencias temporales como 24/7
+        cleaned = re.sub(r"\b24\s*/\s*7\b", "", text_normalized)
+
         # Eliminar palabras de relleno coloquial (sin tildes)
         filler_words = [
             "hola", "quiero", "busco", "necesito", "un", "una", "unos", "unas", "para", "que", "tenga",
@@ -155,14 +160,17 @@ class CriteriaAdvisor:
             "euros", "euro", "por favor", "me gustaria", "estoy buscando", "trabajar", "programar"
         ]
 
-        cleaned = text_normalized
         # Quitar rangos de precio del texto de búsqueda para no contaminar el buscador de la tienda
         cleaned = re.sub(r"(?:menos de|hasta|maximo|entre|a partir de|minimo)\s*\d+.*?(?:€|euros)?", "", cleaned)
         cleaned = re.sub(r"\d+\s*(?:€|euros)", "", cleaned)
 
         # Tokenizar y filtrar
         words = re.findall(r"[a-zA-Z0-9]+", cleaned)
-        filtered_words = [w for w in words if w not in filler_words and len(w) > 1]
+        # Descartar palabras de relleno y números aislados sin contexto que no sean modelos
+        filtered_words = [
+            w for w in words
+            if w not in filler_words and len(w) > 1 and not (w.isdigit() and len(w) <= 2)
+        ]
 
         result = " ".join(filtered_words).strip()
         # Si quedó vacío o muy corto, asegurar al menos la palabra clave de categoría

@@ -23,70 +23,70 @@ class AmazonEsProvider(BaseStoreProvider):
 
     def search(self, criteria: SearchCriteria) -> List[ProductResult]:
         search_url = self.build_search_url(criteria)
-        html = self.get_html(search_url)
-        results: List[ProductResult] = []
-
+        # Intentar obtener el HTML renderizado por navegador para evitar el bloqueo Akamai WAF
+        html = self.get_browser_html(search_url, wait_timeout_ms=1800)
         if not html:
-            return [
-                ProductResult(
-                    title=f"[Acceso directo] Catálogo Amazon España para: '{criteria.clean_query}'",
-                    price=criteria.max_price or 0.0,
-                    store_name=self.store_name,
-                    url=search_url,
-                    in_stock=True,
-                    ships_from_spain=True,
-                    match_score=85.0
-                )
-            ]
+            html = self.get_html(search_url)
+
+        results: List[ProductResult] = []
+        if not html:
+            return []
 
         soup = BeautifulSoup(html, "html.parser")
         items = soup.find_all("div", {"data-component-type": "s-search-result"})
 
-        for item in items[:10]:
+        for item in items:
+            asin = item.get("data-asin")
+            if not asin:
+                continue
+
             title_node = item.find("h2")
-            price_whole = item.find("span", class_="a-price-whole")
-            price_fraction = item.find("span", class_="a-price-fraction")
-            link_node = item.find("a", class_="a-link-normal s-no-outline") or (title_node.find("a") if title_node else None)
+            if not title_node:
+                continue
 
-            if title_node and link_node:
-                title = title_node.get_text(strip=True)
-                price = 0.0
-                if price_whole:
-                    whole_str = price_whole.get_text(strip=True).replace(".", "").replace(",", "")
-                    frac_str = price_fraction.get_text(strip=True) if price_fraction else "00"
-                    try:
-                        price = float(f"{whole_str}.{frac_str}")
-                    except ValueError:
-                        price = 0.0
+            title = title_node.get_text(strip=True)
+            if not title:
+                continue
 
-                href = link_node.get("href") or ""
-                if not href.startswith("http"):
-                    href = urllib.parse.urljoin(self.base_url, href)
+            # Enlace directo al artículo individual mediante su ASIN oficial
+            direct_url = f"{self.base_url}/dp/{asin}"
 
-                # Limpiar parámetros de rastreo superfluos de la URL de Amazon
-                clean_href = href.split("/ref=")[0] if "/ref=" in href else href
+            # Extracción de precio
+            price = 0.0
+            price_offscreen = item.select_one(".a-price .a-offscreen")
+            raw_price = price_offscreen.get_text(strip=True) if price_offscreen else ""
 
-                results.append(
-                    ProductResult(
-                        title=title,
-                        price=price,
-                        store_name=self.store_name,
-                        url=clean_href,
-                        in_stock=True,
-                        ships_from_spain=True
-                    )
-                )
+            if not raw_price:
+                # Buscar patrón de precio en los elementos de texto de la tarjeta
+                for s in item.stripped_strings:
+                    if "€" in s or "eur" in s.lower():
+                        raw_price = s
+                        break
 
-        if not results:
+            price_match = re.search(r"(\d+[\.,]\d{2})", raw_price)
+            if price_match:
+                try:
+                    price = float(price_match.group(1).replace(".", "").replace(",", "."))
+                except ValueError:
+                    price = 0.0
+
+            # Porcentaje de descuento si existe oferta
+            discount = None
+            discount_badge = item.select_one(".savingsPercentage, [class*='savingsPercentage']")
+            if discount_badge:
+                m_d = re.search(r"(\d+)%", discount_badge.get_text())
+                if m_d:
+                    discount = float(m_d.group(1))
+
             results.append(
                 ProductResult(
-                    title=f"Resultados Amazon.es para '{criteria.clean_query}'",
-                    price=criteria.max_price or 0.0,
+                    title=title,
+                    price=price,
                     store_name=self.store_name,
-                    url=search_url,
+                    url=direct_url,
                     in_stock=True,
                     ships_from_spain=True,
-                    match_score=80.0
+                    discount_percentage=discount
                 )
             )
 

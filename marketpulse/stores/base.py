@@ -53,6 +53,14 @@ class BaseStoreProvider(abc.ABC):
         except Exception:
             return None
 
+    def get_browser_html(self, url: str, wait_timeout_ms: int = 2500, wait_until: str = "domcontentloaded") -> Optional[str]:
+        """
+        Obtiene el HTML renderizado mediante navegador headless Playwright.
+        Indispensable para tiendas con protección antibot o contenido generado por cliente JS.
+        """
+        from marketpulse.core.browser import BrowserSession
+        return BrowserSession.fetch_html(url, wait_timeout_ms=wait_timeout_ms, wait_until=wait_until)
+
     def close(self):
         """Cierra la sesión HTTP."""
         try:
