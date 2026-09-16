@@ -13,6 +13,7 @@ Este documento registra todas las decisiones estratégicas, arquitectónicas y t
 5. [ADR-0005: Especialización en el mercado español y envíos locales](#adr-0005-especialización-en-el-mercado-español-y-envíos-locales)
 6. [ADR-0006: Registro estructurado de decisiones en repositorio (`docs/`)](#adr-0006-registro-estructurado-de-decisiones-en-repositorio-docs)
 7. [ADR-0007: Extracción directa de artículos individuales y eliminación de enlaces sustitutivos de búsqueda](#adr-0007-extracción-directa-de-artículos-individuales-y-eliminación-de-enlaces-sustitutivos-de-búsqueda)
+8. [ADR-0008: Filtrado estricto de especificaciones técnicas, exclusiones negativas y límites condicionales](#adr-0008-filtrado-estricto-de-especificaciones-técnicas-exclusiones-negativas-y-límites-condicionales)
 
 ---
 
@@ -106,4 +107,24 @@ Este documento registra todas las decisiones estratégicas, arquitectónicas y t
   4. Introducir en `Aggregator` una regla de descarte explícita que bloquea cualquier URL de listado de búsqueda que pudiera filtrarse.
 * **Consecuencias:**
   Los resultados de la tabla comparativa contienen únicamente productos reales con precios actualizados, enlaces directos de compra y puntuación de afinidad.
+
+---
+
+### ADR-0008: Filtrado estricto de especificaciones técnicas, exclusiones negativas y límites condicionales
+* **Fecha:** 2026-09-16
+* **Estado:** Aprobado
+* **Contexto:**
+  En consultas complejas con restricciones estrictas (procesadores específicos como N100/N150/i3 de 12.ª gen en adelante, mínimos de 16 GB de RAM y 512 GB de SSD, exclusión explícita de AMD/Ryzen/Celeron/Pentium/antiguos y topes de precio condicionales), el motor de búsqueda anterior contaminaba la query enviando términos de exclusión a las tiendas y carecía de validación dura post-búsqueda, permitiendo que aparecieran equipos no conformes (ej. Celeron N2940 con 8 GB de RAM).
+* **Decisión:**
+  1. Refactorizar `CriteriaAdvisor` para segregar cláusulas de exclusión (`descartando ...`, `sin ...`, `evitando ...`), impidiendo que términos negativos entren en la consulta enviada a las tiendas o en los specs positivos.
+  2. Extraer en el modelo `SearchCriteria`: procesadores permitidos (`allowed_cpus`), capacidades mínimas de hardware (`min_ram_gb`, `min_storage_gb`), topes de precio segmentados por CPU (`max_price_by_cpu`) y consultas dirigidas (`target_search_queries`).
+  3. Dotar a `Aggregator` de validaciones matemáticas y regex deterministas:
+     - Descarte absoluto ante cualquier término de exclusión en el título (`amd`, `ryzen`, `celeron`, `pentium`, `j4125`, `8gb`, etc.).
+     - Descarte de procesadores Intel Core de generaciones 11 o inferiores (`i3-3217U`, `i5-8400T`, etc.).
+     - Validación estricta de procesadores permitidos.
+     - Detección y verificación de RAM y almacenamiento mínimo frente a barebones o variantes sub-especificadas (8 GB, 256 GB, etc.).
+     - Cumplimiento de límites de precio condicionales por CPU.
+* **Consecuencias:**
+  Garantía absoluta de que ningún equipo que incumpla cualquiera de los requisitos (procesador, generación, memoria, disco o precio) pase el filtro hacia la comparativa final.
+
 

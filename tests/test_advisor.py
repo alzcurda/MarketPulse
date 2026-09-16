@@ -46,6 +46,42 @@ class TestCriteriaAdvisor(unittest.TestCase):
         self.assertNotIn("menos", clean)
         self.assertIn("portatil", clean)
 
+    def test_complex_prompt_with_exclusions(self):
+        prompt = (
+            "Busca únicamente mini PCs con procesador Intel N100, N150, i3-1215U, i3-1315U o i3-N305, "
+            "que tengan como mínimo 16 GB de RAM y al menos 512 GB o 1 TB de SSD, con envío nacional o desde la Unión Europea, "
+            "descartando por completo cualquier equipo con procesador AMD o Ryzen, procesadores Intel Core de generaciones 10 u 11 o anteriores, "
+            "Celeron o Pentium antiguos como J4125 o N5095, configuraciones de 8 GB de RAM o 256 GB de disco, "
+            "productos de Amazon US o importaciones fuera de la UE, con un precio máximo de 230 € para N100/N150 y hasta 330 € para los Core i3."
+        )
+        criteria = self.advisor.analyze_user_prompt(prompt)
+
+        # Validar CPUs permitidas
+        self.assertIn("N100", criteria.allowed_cpus)
+        self.assertIn("N150", criteria.allowed_cpus)
+        self.assertIn("I3-1215U", criteria.allowed_cpus)
+
+        # Validar límites de hardware
+        self.assertEqual(criteria.min_ram_gb, 16)
+        self.assertEqual(criteria.min_storage_gb, 512)
+
+        # Validar exclusiones
+        self.assertIn("amd", criteria.exclude_keywords)
+        self.assertIn("ryzen", criteria.exclude_keywords)
+        self.assertIn("celeron", criteria.exclude_keywords)
+        self.assertIn("j4125", criteria.exclude_keywords)
+        self.assertIn("8gb", criteria.exclude_keywords)
+
+        # Validar precios condicionales
+        self.assertEqual(criteria.max_price_by_cpu.get("N100"), 230.0)
+        self.assertEqual(criteria.max_price_by_cpu.get("I3"), 330.0)
+        self.assertEqual(criteria.max_price, 330.0)
+
+        # Validar que palabras excluidas no estén en clean_query
+        self.assertNotIn("amd", criteria.clean_query.lower())
+        self.assertNotIn("ryzen", criteria.clean_query.lower())
+        self.assertNotIn("celeron", criteria.clean_query.lower())
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -27,27 +27,34 @@ class AliExpressEsProvider(BaseStoreProvider):
         return url
 
     def search(self, criteria: SearchCriteria) -> List[ProductResult]:
-        search_url = self.build_search_url(criteria)
-        html = self.get_browser_html(search_url, wait_timeout_ms=3000)
-
+        queries = criteria.target_search_queries[:2] if criteria.target_search_queries else [criteria.clean_query]
         results: List[ProductResult] = []
-        if not html:
-            return []
-
-        soup = BeautifulSoup(html, "html.parser")
-        # Enlaces a artículos de AliExpress con patrón /item/{id}.html
-        links = soup.find_all("a", href=re.compile(r"/item/(\d+)\.html"))
         seen_items = set()
 
-        for a in links:
-            href = a.get("href", "")
-            m = re.search(r"/item/(\d+)\.html", href)
-            if not m:
+        for q in queries:
+            query_encoded = urllib.parse.quote_plus(q)
+            search_url = f"{self.base_url}/w/wholesale-{query_encoded}.html?shipFromCountry=ES"
+            if criteria.max_price:
+                search_url += f"&maxPrice={int(criteria.max_price)}"
+            if criteria.min_price:
+                search_url += f"&minPrice={int(criteria.min_price)}"
+
+            html = self.get_browser_html(search_url, wait_timeout_ms=2500)
+            if not html:
                 continue
-            item_id = m.group(1)
-            if item_id in seen_items:
-                continue
-            seen_items.add(item_id)
+
+            soup = BeautifulSoup(html, "html.parser")
+            links = soup.find_all("a", href=re.compile(r"/item/(\d+)\.html"))
+
+            for a in links:
+                href = a.get("href", "")
+                m = re.search(r"/item/(\d+)\.html", href)
+                if not m:
+                    continue
+                item_id = m.group(1)
+                if item_id in seen_items:
+                    continue
+                seen_items.add(item_id)
 
             # Localizar el contenedor de la tarjeta de producto
             card = a

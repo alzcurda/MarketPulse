@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import List, Optional
+from typing import Dict, List, Optional
 from pydantic import BaseModel, Field
 
 
@@ -24,6 +24,11 @@ class SearchCriteria(BaseModel):
     key_specs: List[str] = Field(default_factory=list, description="Especificaciones clave (ej: 16GB RAM, RTX 4060, i7)")
     must_have_keywords: List[str] = Field(default_factory=list, description="Palabras indispensables en el título/descripción")
     exclude_keywords: List[str] = Field(default_factory=list, description="Palabras que descartan el resultado (ej: reacondicionado)")
+    min_ram_gb: Optional[int] = Field(default=None, description="Capacidad mínima de RAM exigida en GB")
+    min_storage_gb: Optional[int] = Field(default=None, description="Capacidad mínima de almacenamiento SSD exigida en GB")
+    allowed_cpus: List[str] = Field(default_factory=list, description="Modelos de procesador permitidos (ej: N100, N150, I3-1215U)")
+    max_price_by_cpu: Dict[str, float] = Field(default_factory=dict, description="Límites máximos de precio por procesador")
+    target_search_queries: List[str] = Field(default_factory=list, description="Consultas de búsqueda complementarias segmentadas")
     in_stock_only: bool = Field(default=True, description="Filtrar solo productos en stock")
     ships_from_spain_only: bool = Field(default=True, description="Garantizar envío desde España o almacén europeo sin aduanas")
     sort_by: str = Field(default="relevance", description="Criterio de ordenación: relevance, price_asc, price_desc")

@@ -22,72 +22,77 @@ class AmazonEsProvider(BaseStoreProvider):
         return url
 
     def search(self, criteria: SearchCriteria) -> List[ProductResult]:
-        search_url = self.build_search_url(criteria)
-        # Intentar obtener el HTML renderizado por navegador para evitar el bloqueo Akamai WAF
-        html = self.get_browser_html(search_url, wait_timeout_ms=1800)
-        if not html:
-            html = self.get_html(search_url)
-
+        queries = criteria.target_search_queries[:3] if criteria.target_search_queries else [criteria.clean_query]
         results: List[ProductResult] = []
-        if not html:
-            return []
+        seen_asins = set()
 
-        soup = BeautifulSoup(html, "html.parser")
-        items = soup.find_all("div", {"data-component-type": "s-search-result"})
+        for q in queries:
+            query_encoded = urllib.parse.quote_plus(q)
+            search_url = f"{self.base_url}/s?k={query_encoded}"
+            if criteria.max_price:
+                search_url += f"&rh=p_36%3A-{int(criteria.max_price * 100)}"
 
-        for item in items:
-            asin = item.get("data-asin")
-            if not asin:
+            html = self.get_browser_html(search_url, wait_timeout_ms=1800)
+            if not html:
+                html = self.get_html(search_url)
+            if not html:
                 continue
 
-            title_node = item.find("h2")
-            if not title_node:
-                continue
+            soup = BeautifulSoup(html, "html.parser")
+            items = soup.find_all("div", {"data-component-type": "s-search-result"})
 
-            title = title_node.get_text(strip=True)
-            if not title:
-                continue
+            for item in items:
+                asin = item.get("data-asin")
+                if not asin or asin in seen_asins:
+                    continue
 
-            # Enlace directo al artículo individual mediante su ASIN oficial
-            direct_url = f"{self.base_url}/dp/{asin}"
+                title_node = item.find("h2")
+                if not title_node:
+                    continue
 
-            # Extracción de precio
-            price = 0.0
-            price_offscreen = item.select_one(".a-price .a-offscreen")
-            raw_price = price_offscreen.get_text(strip=True) if price_offscreen else ""
+                title = title_node.get_text(strip=True)
+                if not title:
+                    continue
 
-            if not raw_price:
-                # Buscar patrón de precio en los elementos de texto de la tarjeta
-                for s in item.stripped_strings:
-                    if "€" in s or "eur" in s.lower():
-                        raw_price = s
-                        break
+                seen_asins.add(asin)
+                direct_url = f"{self.base_url}/dp/{asin}"
 
-            price_match = re.search(r"(\d+[\.,]\d{2})", raw_price)
-            if price_match:
-                try:
-                    price = float(price_match.group(1).replace(".", "").replace(",", "."))
-                except ValueError:
-                    price = 0.0
+                # Extracción de precio
+                price = 0.0
+                price_offscreen = item.select_one(".a-price .a-offscreen")
+                raw_price = price_offscreen.get_text(strip=True) if price_offscreen else ""
 
-            # Porcentaje de descuento si existe oferta
-            discount = None
-            discount_badge = item.select_one(".savingsPercentage, [class*='savingsPercentage']")
-            if discount_badge:
-                m_d = re.search(r"(\d+)%", discount_badge.get_text())
-                if m_d:
-                    discount = float(m_d.group(1))
+                if not raw_price:
+                    for s in item.stripped_strings:
+                        if "€" in s or "eur" in s.lower():
+                            raw_price = s
+                            break
 
-            results.append(
-                ProductResult(
-                    title=title,
-                    price=price,
-                    store_name=self.store_name,
-                    url=direct_url,
-                    in_stock=True,
-                    ships_from_spain=True,
-                    discount_percentage=discount
+                price_match = re.search(r"(\d+[\.,]\d{2})", raw_price)
+                if price_match:
+                    try:
+                        price = float(price_match.group(1).replace(".", "").replace(",", "."))
+                    except ValueError:
+                        price = 0.0
+
+                # Porcentaje de descuento si existe oferta
+                discount = None
+                discount_badge = item.select_one(".savingsPercentage, [class*='savingsPercentage']")
+                if discount_badge:
+                    m_d = re.search(r"(\d+)%", discount_badge.get_text())
+                    if m_d:
+                        discount = float(m_d.group(1))
+
+                results.append(
+                    ProductResult(
+                        title=title,
+                        price=price,
+                        store_name=self.store_name,
+                        url=direct_url,
+                        in_stock=True,
+                        ships_from_spain=True,
+                        discount_percentage=discount
+                    )
                 )
-            )
 
         return results

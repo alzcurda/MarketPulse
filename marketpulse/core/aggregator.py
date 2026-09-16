@@ -74,9 +74,67 @@ class Aggregator:
                 if any(re.search(rf"\b{acc}\b", title_lower) for acc in accessory_words):
                     continue
 
-            # Filtro de palabras excluidas
-            if any(ex.lower() in title_lower for ex in criteria.exclude_keywords):
+            # Filtro de palabras excluidas (palabras completas)
+            if any(re.search(rf"\b{re.escape(ex.lower())}\b", title_lower) for ex in criteria.exclude_keywords):
                 continue
+
+            title_upper = prod.title.upper()
+
+            # Exclusión de procesadores Intel Core de generaciones antiguas (<= 11)
+            old_core = re.search(r"\bI[3579]-?(?:[1-9]\d{2,3}|1[01]\d{3})[A-Z0-9]*\b", title_upper)
+            if old_core:
+                matched_allowed = any(re.search(rf"\b{re.escape(c.upper())}\b", title_upper) for c in criteria.allowed_cpus)
+                if not matched_allowed:
+                    continue
+
+            # Filtro estricto de procesadores permitidos
+            detected_cpu = None
+            if criteria.allowed_cpus:
+                matched_cpus = [c for c in criteria.allowed_cpus if re.search(rf"\b{re.escape(c.upper())}\b", title_upper)]
+                if not matched_cpus:
+                    continue
+                detected_cpu = matched_cpus[0]
+
+            # Filtro de memoria RAM mínima
+            if criteria.min_ram_gb:
+                if "BAREBONE" in title_upper or "SIN RAM" in title_upper:
+                    continue
+                ram_matches = re.findall(r"\b(\d{1,2})\s*GB\s*(?:DDR\d\s*)?RAM\b", title_upper)
+                if not ram_matches:
+                    ram_matches = re.findall(r"\b(\d{1,2})\s*G\s*RAM\b", title_upper)
+                if not ram_matches:
+                    comb = re.findall(r"\b(\d{1,2})\s*GB\s*(?:[+/]|DDR\d)", title_upper)
+                    if comb:
+                        ram_matches = comb
+                if ram_matches:
+                    max_found_ram = max(int(r) for r in ram_matches)
+                    if max_found_ram < criteria.min_ram_gb:
+                        continue
+
+            # Filtro de almacenamiento SSD mínimo
+            if criteria.min_storage_gb:
+                if "BAREBONE" in title_upper or "SIN DISCO" in title_upper or "SIN SSD" in title_upper:
+                    continue
+                has_tb = bool(re.search(r"\b\d\s*TB\b", title_upper))
+                if not has_tb:
+                    disk_matches = re.findall(r"\b(\d{2,4})\s*GB\s*(?:SSD|ROM|DISCO|EMMC|NVME|M\.2|PCIE)\b", title_upper)
+                    if not disk_matches:
+                        disk_matches = re.findall(r"(?:[+/]|\b(?:CON|DE)\s*)(\d{3,4})\s*GB\b", title_upper)
+                    if disk_matches:
+                        max_found_disk = max(int(d) for d in disk_matches)
+                        if max_found_disk >= 64 and max_found_disk < criteria.min_storage_gb:
+                            continue
+
+            # Filtro de precios condicionales por CPU
+            if criteria.max_price_by_cpu and detected_cpu:
+                exceeded_cpu_price = False
+                for cpu_key, p_max in criteria.max_price_by_cpu.items():
+                    if cpu_key.upper() in detected_cpu.upper() or detected_cpu.upper() in cpu_key.upper():
+                        if prod.price > p_max:
+                            exceeded_cpu_price = True
+                            break
+                if exceeded_cpu_price:
+                    continue
 
             # Filtro de stock
             if criteria.in_stock_only and not prod.in_stock:
@@ -86,11 +144,11 @@ class Aggregator:
             if criteria.ships_from_spain_only and not prod.ships_from_spain:
                 continue
 
-            # Filtro de precio máximo
+            # Filtro de precio máximo general
             if criteria.max_price and prod.price > criteria.max_price:
                 continue
 
-            # Filtro de precio mínimo
+            # Filtro de precio mínimo general
             if criteria.min_price and prod.price < criteria.min_price:
                 continue
 

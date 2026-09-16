@@ -105,6 +105,75 @@ class TestAggregator(unittest.TestCase):
         self.assertEqual(filtered[0].url, "https://www.amazon.es/dp/B0XYZ12345")
         self.assertEqual(filtered[0].title, "Portátil Real Lenovo IdeaPad 16GB RAM")
 
+    def test_strict_hardware_and_cpu_filtering(self):
+        criteria = SearchCriteria(
+            raw_query="Test prompt",
+            clean_query="mini pc n100 16gb 512gb",
+            allowed_cpus=["N100", "N150", "I3-1215U", "I3-1315U", "I3-N305", "N305"],
+            min_ram_gb=16,
+            min_storage_gb=512,
+            exclude_keywords=["amd", "ryzen", "celeron", "pentium", "j4125", "n5095", "n2940", "amazon us"],
+            max_price_by_cpu={"N100": 230.0, "N150": 230.0, "I3": 330.0},
+            max_price=330.0
+        )
+
+        candidates = [
+            # 1. Celeron N2940 (excluido por celeron y por n2940)
+            ProductResult(
+                title="Mini PC sin ventilador N2940 8 GB RAM 128 GB SSD Intel Celeron Fanless",
+                price=170.21,
+                store_name="Amazon España",
+                url="https://www.amazon.es/dp/B0HBWW4FY7"
+            ),
+            # 2. PELADN N100 pero solo 8GB RAM / 256GB y precio 262.40 > 230
+            ProductResult(
+                title="PELADN Mini PC, Intel N100 (hasta 3.4 GHz), 8 GB DDR4/256 GB SSD",
+                price=262.40,
+                store_name="Amazon España",
+                url="https://www.amazon.es/dp/B0D3WMV21G"
+            ),
+            # 3. Barebone sin RAM
+            ProductResult(
+                title="DreamQuest Mini PC Barebone N150 de 12.ª generación (hasta 3,4 GHz)",
+                price=229.09,
+                store_name="Amazon España",
+                url="https://www.amazon.es/dp/B0GX51PXSZ"
+            ),
+            # 4. Core i3 antiguo de 3ª generación
+            ProductResult(
+                title="Best small desktop PC Mi3217 Good PC Core i3-3217U Processor (3M Cache)",
+                price=273.10,
+                store_name="Amazon España",
+                url="https://www.amazon.es/dp/B01MZ63SD8"
+            ),
+            # 5. Core i3 antiguo con 2G RAM
+            ProductResult(
+                title="Fastest Mini Computer mi3217 Mini PC i3 – 3217U 3 m Cache 2 G RAM",
+                price=252.09,
+                store_name="Amazon España",
+                url="https://www.amazon.es/dp/B01N5F0BPV"
+            ),
+            # 6. AMD Ryzen (excluido)
+            ProductResult(
+                title="BOSGAME Mini PC E2, mini computadoras con AMD Ryzen 5 3550H, 16 GB",
+                price=327.92,
+                store_name="Amazon España",
+                url="https://www.amazon.es/dp/B0DNT28BV1"
+            ),
+            # 7. PRODUCTO VÁLIDO QUE SÍ CUMPLE (N100, 16GB, 512GB, <= 230€)
+            ProductResult(
+                title="MeLE Quieter4C Mini PC sin Ventilador N100 16GB 512GB Microordenador",
+                price=229.00,
+                store_name="Amazon España",
+                url="https://www.amazon.es/dp/B0CNV981QH"
+            )
+        ]
+
+        filtered = self.aggregator.filter_and_rank(candidates, criteria)
+        self.assertEqual(len(filtered), 1)
+        self.assertEqual(filtered[0].title, "MeLE Quieter4C Mini PC sin Ventilador N100 16GB 512GB Microordenador")
+        self.assertEqual(filtered[0].url, "https://www.amazon.es/dp/B0CNV981QH")
+
 
 if __name__ == "__main__":
     unittest.main()

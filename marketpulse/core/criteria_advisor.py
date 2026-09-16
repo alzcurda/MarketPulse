@@ -78,50 +78,96 @@ class CriteriaAdvisor:
 
     def extract_budget(self, text: str) -> Tuple[Optional[float], Optional[float]]:
         """
-        Extrae rangos de presupuesto como 'menos de 800€', 'hasta 1000', 'entre 500 y 700€'.
+        Extrae rangos de presupuesto monetario (requiere símbolo € o palabra euros o contexto de precio).
+        Evita confundir especificaciones técnicas como '16 GB de RAM' con precios.
         """
         text_lower = text.lower().replace(",", ".")
         min_price = None
         max_price = None
 
-        # Patrón: entre X y Y
-        between_match = re.search(r"entre\s+(\d+(?:\.\d+)?)\s*(?:€|euros)?\s*y\s*(\d+(?:\.\d+)?)\s*(?:€|euros)?", text_lower)
+        # Descartar falsos positivos donde un número precede a unidades de hardware
+        def is_valid_price(number_str: str, full_match_end: int, raw_text: str) -> bool:
+            sub = raw_text[full_match_end:].strip().lower()
+            if re.match(r"^(?:gb|tb|hz|ram|rom|ssd|disco|pulgadas|dias|días|anos|años)", sub):
+                return False
+            return True
+
+        # 1. Patrón: entre X y Y euros/€
+        between_match = re.search(r"entre\s+(\d+(?:\.\d+)?)\s*(?:€|euros)?\s*y\s*(\d+(?:\.\d+)?)\s*(?:€|euros)", text_lower)
         if between_match:
             min_price = float(between_match.group(1))
             max_price = float(between_match.group(2))
             return min_price, max_price
 
-        # Patrón: menos de X, maximo X, hasta X
-        max_match = re.search(r"(?:menos de|hasta|máximo|maximo|presupuesto de|por debajo de)\s*(\d+(?:\.\d+)?)\s*(?:€|euros)?", text_lower)
-        if max_match:
-            max_price = float(max_match.group(1))
+        # 2. Patrón: menos de X, maximo X, hasta X
+        for m in re.finditer(r"(?:menos de|hasta|máximo|maximo|presupuesto de|por debajo de)\s*(\d+(?:\.\d+)?)\s*(?:€|euros)?", text_lower):
+            if is_valid_price(m.group(1), m.end(), text_lower):
+                # Si no tiene € explícito, verificar que no sea un spec de hardware
+                if "€" in m.group(0) or "euro" in m.group(0) or "presupuesto" in m.group(0):
+                    max_price = float(m.group(1))
+                elif float(m.group(1)) >= 50: # Los precios reales en esta categoría suelen ser >= 50
+                    max_price = float(m.group(1))
 
-        # Patrón: mas de X, minimo X, a partir de X
-        min_match = re.search(r"(?:más de|mas de|mínimo|minimo|a partir de)\s*(\d+(?:\.\d+)?)\s*(?:€|euros)?", text_lower)
-        if min_match:
-            min_price = float(min_match.group(1))
+        # 3. Patrón: mas de X, minimo X, a partir de X
+        for m in re.finditer(r"(?:más de|mas de|mínimo|minimo|a partir de|desde)\s*(\d+(?:\.\d+)?)\s*(?:€|euros)", text_lower):
+            if is_valid_price(m.group(1), m.end(), text_lower):
+                min_price = float(m.group(1))
 
         return min_price, max_price
 
+    def extract_conditional_prices(self, text: str) -> Dict[str, float]:
+        """
+        Detecta precios condicionales por CPU como:
+        'precio máximo de 230 € para N100/N150 y hasta 330 € para los Core i3'
+        """
+        prices: Dict[str, float] = {}
+
+        pat = r"(?:precio máximo de|precio maximo de|hasta|máximo de?|maximo de?)\s*(\d+(?:\.\d+)?)\s*€?\s*(?:para|en)\s*([^\.,]+?)(?=\s+(?:y|e)\s+|\.|\,|$)"
+
+        for m in re.finditer(pat, text, flags=re.I):
+            try:
+                price_val = float(m.group(1))
+                target_str = m.group(2).upper()
+                if "N100" in target_str:
+                    prices["N100"] = price_val
+                if "N150" in target_str:
+                    prices["N150"] = price_val
+                if "N95" in target_str:
+                    prices["N95"] = price_val
+                if "N305" in target_str:
+                    prices["N305"] = price_val
+                if "I3" in target_str:
+                    prices["I3"] = price_val
+                if "I5" in target_str:
+                    prices["I5"] = price_val
+            except ValueError:
+                pass
+
+        return prices
+
     def extract_key_specs(self, text: str) -> List[str]:
-        """Detecta especificaciones técnicas mencionadas en la consulta."""
+        """Detecta especificaciones técnicas positivas mencionadas en la consulta."""
         found_specs = []
         text_upper = text.upper()
 
         # Detección de memoria RAM
         ram_match = re.findall(r"\b(\d{1,2}\s*GB)\b", text_upper)
         for ram in ram_match:
-            found_specs.append(f"{ram.replace(' ', '')} RAM")
+            spec = f"{ram.replace(' ', '')} RAM"
+            if spec not in found_specs:
+                found_specs.append(spec)
 
         # Detección de procesadores o gráficas habituales
         patterns = [
             r"\b(RTX\s*\d{4}(?:\s*TI)?)\b",
             r"\b(GTX\s*\d{4})\b",
             r"\b(RYZEN\s*\d(?:\s*\d{4}[A-Z]*)?)\b",
+            r"\b(I[3579]-(?:1[2-4]\d{2}[A-Z]*|N\d{3}))\b",
             r"\b(I[3579]-?\d{4,5}[A-Z]*)\b",
             r"\b(I[3579])\b",
             r"\b(INTEL\s*N\d{2,3})\b",
             r"\b(N\d{2,3})\b",
+            r"\b(I3-N305|N305)\b",
             r"\b(OLED|AMOLED|IPS)\b",
             r"\b(\d{2,3}\s*HZ)\b",
             r"\b(1TB|512GB|256GB|2TB)\s*(?:SSD)?\b",
@@ -136,6 +182,82 @@ class CriteriaAdvisor:
 
         return found_specs
 
+    def extract_allowed_cpus(self, text: str) -> List[str]:
+        """Detecta modelos específicos de CPU requeridos por el usuario."""
+        text_upper = text.upper()
+        allowed = []
+
+        patterns = [
+            r"\b(I[3579]-(?:1[2-4]\d{2}[A-Z]*|N\d{3}))\b",
+            r"\b(I3-N305|N305)\b",
+            r"\b(N\d{2,3})\b",
+        ]
+
+        for pat in patterns:
+            for m in re.finditer(pat, text_upper):
+                val = m.group(1).strip()
+                if val not in allowed:
+                    allowed.append(val)
+
+        return allowed
+
+    def extract_hardware_limits(self, text: str) -> Tuple[Optional[int], Optional[int]]:
+        """Extrae requisitos mínimos de RAM (GB) y almacenamiento SSD (GB)."""
+        text_lower = text.lower()
+        min_ram = None
+        min_storage = None
+
+        # Requisito mínimo de RAM
+        m_ram = re.search(r"(?:como mínimo|mínimo|al menos|desde)\s*(\d{1,2})\s*gb\s*(?:de\s*)?ram", text_lower)
+        if not m_ram:
+            m_ram = re.search(r"(\d{1,2})\s*gb\s*(?:de\s*)?ram\s*(?:como mínimo|mínimo|o más)", text_lower)
+        if m_ram:
+            min_ram = int(m_ram.group(1))
+
+        # Requisito mínimo de almacenamiento SSD
+        m_storage = re.search(r"(?:como mínimo|mínimo|al menos|desde)\s*(\d{3,4})\s*gb(?:\s*o\s*(\d)\s*tb)?\s*(?:de\s*)?(?:ssd|disco|almacenamiento)", text_lower)
+        if m_storage:
+            min_storage = int(m_storage.group(1))
+        else:
+            m_tb = re.search(r"(?:como mínimo|mínimo|al menos)\s*(\d)\s*tb", text_lower)
+            if m_tb:
+                min_storage = int(m_tb.group(1)) * 1024
+
+        return min_ram, min_storage
+
+    def extract_exclusions(self, text: str) -> List[str]:
+        """Extrae palabras y marcas explícitamente excluidas."""
+        text_lower = text.lower()
+        exclude_list = []
+
+        # Marcas y arquitecturas
+        if re.search(r"\bamd\b", text_lower):
+            exclude_list.extend(["amd", "ryzen"])
+        if re.search(r"\bryzen\b", text_lower) and "ryzen" not in exclude_list:
+            exclude_list.append("ryzen")
+        if re.search(r"\bceleron\b", text_lower):
+            exclude_list.append("celeron")
+        if re.search(r"\bpentium\b", text_lower):
+            exclude_list.append("pentium")
+
+        # Chips específicos antiguos
+        for m in re.finditer(r"\b([jn]\d{4})\b", text_lower):
+            chip = m.group(1)
+            if chip not in exclude_list:
+                exclude_list.append(chip)
+
+        # Configuraciones de RAM y disco descartadas
+        for m in re.finditer(r"\b(\d{1,2})\s*gb\s*(?:de\s*)?ram\b", text_lower):
+            exclude_list.extend([f"{m.group(1)}gb", f"{m.group(1)} gb"])
+        for m in re.finditer(r"\b(\d{2,3})\s*gb\s*(?:de\s*)?(?:disco|ssd)\b", text_lower):
+            exclude_list.extend([f"{m.group(1)}gb", f"{m.group(1)} gb"])
+
+        # Orígenes descartados
+        if re.search(r"amazon\s*us|fuera\s*(?:de\s*)?la\s*ue", text_lower):
+            exclude_list.extend(["amazon us", "importacion"])
+
+        return exclude_list
+
     @staticmethod
     def strip_accents(text: str) -> str:
         """Elimina tildes y caracteres diacríticos para búsquedas normalizadas."""
@@ -144,36 +266,40 @@ class CriteriaAdvisor:
 
     def clean_search_query(self, text: str, category: ProductCategory) -> str:
         """
-        Convierte una petición conversacional (ej. 'quiero un portátil para programar que tenga 16gb')
-        en una query compacta y efectiva para buscadores de tiendas (ej. 'portatil 16gb').
+        Convierte una petición conversacional en una query compacta y efectiva para buscadores de tiendas.
+        Descarta previamente cualquier cláusula negativa/de exclusión.
         """
-        # Normalizar tildes para evitar discrepancias de codificación o formato
-        text_normalized = self.strip_accents(text.lower())
+        # Separar y quedarse solo con la parte positiva
+        exclusion_markers = r"\b(?:descartando|excluyendo|evitando|sin\s+(?:procesador|equipos?|marcas?|amd|celeron)|no\s+quiero|nada\s+de|quitar|obviar)\b"
+        parts = re.split(exclusion_markers, text, flags=re.I)
+        positive_text = parts[0]
+
+        # Normalizar tildes
+        text_normalized = self.strip_accents(positive_text.lower())
 
         # Limpiar referencias temporales como 24/7
         cleaned = re.sub(r"\b24\s*/\s*7\b", "", text_normalized)
 
-        # Eliminar palabras de relleno coloquial (sin tildes)
+        # Palabras de relleno coloquial
         filler_words = [
             "hola", "quiero", "busco", "necesito", "un", "una", "unos", "unas", "para", "que", "tenga",
             "sea", "bueno", "bonito", "barato", "comprar", "encontrar", "sobre", "alrededor", "de",
-            "euros", "euro", "por favor", "me gustaria", "estoy buscando", "trabajar", "programar"
+            "euros", "euro", "por favor", "me gustaria", "estoy buscando", "trabajar", "programar",
+            "unicamente", "solamente", "solo", "con", "al", "menos", "como", "minimo", "desde",
+            "envio", "nacional", "union", "europea", "ue"
         ]
 
-        # Quitar rangos de precio del texto de búsqueda para no contaminar el buscador de la tienda
+        # Quitar rangos de precio
         cleaned = re.sub(r"(?:menos de|hasta|maximo|entre|a partir de|minimo)\s*\d+.*?(?:€|euros)?", "", cleaned)
         cleaned = re.sub(r"\d+\s*(?:€|euros)", "", cleaned)
 
-        # Tokenizar y filtrar
         words = re.findall(r"[a-zA-Z0-9]+", cleaned)
-        # Descartar palabras de relleno y números aislados sin contexto que no sean modelos
         filtered_words = [
             w for w in words
             if w not in filler_words and len(w) > 1 and not (w.isdigit() and len(w) <= 2)
         ]
 
         result = " ".join(filtered_words).strip()
-        # Si quedó vacío o muy corto, asegurar al menos la palabra clave de categoría
         if not result:
             if category == ProductCategory.LAPTOPS:
                 result = "portatil"
@@ -186,12 +312,60 @@ class CriteriaAdvisor:
 
         return result
 
+    def build_targeted_queries(self, clean_query: str, allowed_cpus: List[str], min_ram_gb: Optional[int], min_storage_gb: Optional[int]) -> List[str]:
+        """
+        Construye consultas segmentadas de alta precisión para los buscadores de las tiendas.
+        """
+        base_product = "mini pc" if "mini pc" in clean_query.lower() else clean_query.split()[0]
+        ram_str = f"{min_ram_gb}gb" if min_ram_gb else ""
+        storage_str = f"{min_storage_gb}gb" if min_storage_gb else ""
+
+        queries = []
+        if allowed_cpus:
+            # Agrupar chips para consultas eficaces
+            for cpu in allowed_cpus[:4]:
+                q_parts = [base_product, cpu.lower()]
+                if ram_str:
+                    q_parts.append(ram_str)
+                if storage_str and min_storage_gb and min_storage_gb >= 512:
+                    q_parts.append(storage_str)
+                queries.append(" ".join(q_parts))
+        else:
+            queries.append(clean_query)
+
+        return queries
+
     def analyze_user_prompt(self, prompt: str) -> SearchCriteria:
         """Analiza integralmente la entrada del usuario y genera un SearchCriteria estructurado."""
-        category = self.detect_category(prompt)
+        # 1. Separar requerimientos positivos de cláusulas de exclusión
+        exclusion_markers = r"\b(?:descartando|excluyendo|evitando|sin\s+(?:procesador|equipos?|marcas?|amd|celeron)|no\s+quiero|nada\s+de|quitar|obviar)\b"
+        parts = re.split(exclusion_markers, prompt, flags=re.I)
+        positive_text = parts[0]
+        negative_text = " ".join(parts[1:]) if len(parts) > 1 else ""
+
+        category = self.detect_category(positive_text)
         min_price, max_price = self.extract_budget(prompt)
-        key_specs = self.extract_key_specs(prompt)
+        max_price_by_cpu = self.extract_conditional_prices(prompt)
+
+        # Si hay precios condicionales, asegurar que max_price sea el techo superior
+        if max_price_by_cpu and (max_price is None or max(max_price_by_cpu.values()) > max_price):
+            max_price = max(max_price_by_cpu.values())
+
+        # Extraer CPUs permitidas y límites de hardware
+        allowed_cpus = self.extract_allowed_cpus(positive_text)
+        min_ram_gb, min_storage_gb = self.extract_hardware_limits(positive_text)
+
+        # Especificaciones clave SOLO de la parte positiva
+        key_specs = self.extract_key_specs(positive_text)
+
+        # Exclusiones SOLO de la parte negativa
+        exclude_keywords = self.extract_exclusions(negative_text)
+
+        # Query limpia positiva para motores de búsqueda
         clean_query = self.clean_search_query(prompt, category)
+
+        # Consultas dirigidas segmentadas
+        target_queries = self.build_targeted_queries(clean_query, allowed_cpus, min_ram_gb, min_storage_gb)
 
         return SearchCriteria(
             raw_query=prompt,
@@ -200,6 +374,13 @@ class CriteriaAdvisor:
             min_price=min_price,
             max_price=max_price,
             key_specs=key_specs,
+            must_have_keywords=[],
+            exclude_keywords=exclude_keywords,
+            min_ram_gb=min_ram_gb,
+            min_storage_gb=min_storage_gb,
+            allowed_cpus=allowed_cpus,
+            max_price_by_cpu=max_price_by_cpu,
+            target_search_queries=target_queries,
             ships_from_spain_only=True,
             in_stock_only=True,
         )
@@ -210,3 +391,4 @@ class CriteriaAdvisor:
             "Verificar garantía oficial de 3 años en España",
             "Comprobar disponibilidad y costes de envío"
         ])
+
