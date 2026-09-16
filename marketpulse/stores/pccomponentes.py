@@ -4,6 +4,13 @@ from typing import List
 from bs4 import BeautifulSoup
 from marketpulse.models import ProductResult, SearchCriteria
 from marketpulse.stores.base import BaseStoreProvider
+from marketpulse.core.pricing import (
+    parse_price,
+    is_financing_or_unit_price,
+    is_strikethrough_or_old_price,
+    is_sponsored_card,
+    is_out_of_stock,
+)
 
 
 class PcComponentesProvider(BaseStoreProvider):
@@ -36,30 +43,49 @@ class PcComponentesProvider(BaseStoreProvider):
             articles = soup.find_all(["article", "div"], class_=re.compile(r"product-card|c-product-card", re.I))
 
             for article in articles:
+                # Descartar anuncios y productos patrocinados
+                if is_sponsored_card(article):
+                    continue
+
                 title_elem = article.find(["h3", "h2", "a"], class_=re.compile(r"title|name", re.I)) or article.find("a")
-                price_elem = article.find(class_=re.compile(r"price|precio", re.I))
+                if not title_elem:
+                    continue
 
-                if title_elem and price_elem:
-                    title = title_elem.get_text(strip=True)
-                    raw_price = price_elem.get_text(strip=True)
-                    price_match = re.search(r"(\d+(?:[\.,]\d+)?)", raw_price.replace(".", "").replace(",", "."))
-                    price = float(price_match.group(1)) if price_match else 0.0
+                title = title_elem.get_text(strip=True)
+                href = title_elem.get("href") or ""
+                if not href.startswith("http"):
+                    href = urllib.parse.urljoin(self.base_url, href)
 
-                    href = title_elem.get("href") or ""
-                    if not href.startswith("http"):
-                        href = urllib.parse.urljoin(self.base_url, href)
+                if is_sponsored_card(article, href):
+                    continue
 
-                    if "/buscar" not in href and title:
-                        results.append(
-                            ProductResult(
-                                title=title,
-                                price=price,
-                                store_name=self.store_name,
-                                url=href,
-                                in_stock=True,
-                                ships_from_spain=True
-                            )
+                in_stock = not is_out_of_stock(article)
+
+                # Buscar elemento de precio activo (evitar precios tachados)
+                price = 0.0
+                price_elems = article.find_all(class_=re.compile(r"price|precio", re.I))
+                for pe in price_elems:
+                    if is_strikethrough_or_old_price(pe):
+                        continue
+                    p_text = pe.get_text(strip=True)
+                    if is_financing_or_unit_price(p_text):
+                        continue
+                    parsed = parse_price(p_text)
+                    if parsed and parsed > 0:
+                        price = parsed
+                        break
+
+                if "/buscar" not in href and title:
+                    results.append(
+                        ProductResult(
+                            title=title,
+                            price=price,
+                            store_name=self.store_name,
+                            url=href,
+                            in_stock=in_stock,
+                            ships_from_spain=True
                         )
+                    )
 
         # 2. Si el WAF/Cloudflare bloqueó el acceso directo, indexar artículos reales de PcComponentes
         if not results:
@@ -80,8 +106,11 @@ class PcComponentesProvider(BaseStoreProvider):
                         if "pccomponentes.com/" in href and not any(x in href for x in ["/buscar", "/soporte", "/login", "/cart", "/opiniones"]):
                             title = a_elem.get_text(strip=True)
                             snippet = snippets[i].get_text(strip=True) if i < len(snippets) else ""
-                            m_p = re.search(r"(\d+[\.,]\d{2})\s*€", snippet)
-                            price = float(m_p.group(1).replace(".", "").replace(",", ".")) if m_p else 0.0
+                            price = 0.0
+                            if not is_financing_or_unit_price(snippet):
+                                m_p = re.search(r"(\d+(?:[\.,]\d{2})?)\s*€", snippet) or re.search(r"€\s*(\d+(?:[\.,]\d{2})?)", snippet)
+                                if m_p:
+                                    price = parse_price(m_p.group(0)) or 0.0
                             results.append(
                                 ProductResult(
                                     title=title,

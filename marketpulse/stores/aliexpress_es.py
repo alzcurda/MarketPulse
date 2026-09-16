@@ -4,6 +4,13 @@ from typing import List
 from bs4 import BeautifulSoup
 from marketpulse.models import ProductResult, SearchCriteria
 from marketpulse.stores.base import BaseStoreProvider
+from marketpulse.core.pricing import (
+    parse_price,
+    is_financing_or_unit_price,
+    is_strikethrough_or_old_price,
+    is_sponsored_card,
+    is_out_of_stock,
+)
 
 
 class AliExpressEsProvider(BaseStoreProvider):
@@ -64,6 +71,7 @@ class AliExpressEsProvider(BaseStoreProvider):
                 if item_id in seen_items:
                     continue
                 seen_items.add(item_id)
+                direct_url = f"{self.base_url}/item/{item_id}.html"
 
                 # Localizar el contenedor de la tarjeta de producto
                 card = a
@@ -72,6 +80,13 @@ class AliExpressEsProvider(BaseStoreProvider):
                         card = card.parent
                         if "€" in card.get_text():
                             break
+
+                # Descartar anuncios y tarjetas patrocinadas
+                if is_sponsored_card(card, direct_url):
+                    continue
+
+                # Comprobar disponibilidad de stock
+                in_stock = not is_out_of_stock(card)
 
                 # Título del artículo
                 title = ""
@@ -88,26 +103,26 @@ class AliExpressEsProvider(BaseStoreProvider):
                 if not title:
                     continue
 
-                # Extracción de precio en euros
+                # Extracción de precio en euros (evitando precios tachados y financiación)
                 price = 0.0
-                price_spans = card.select("[class*='price'], [class*='Price']")
-                if price_spans:
-                    p_text = price_spans[0].get_text(strip=True)
-                    m_p = re.search(r"(\d+[\.,]\d{2})", p_text)
-                    if m_p:
-                        price = float(m_p.group(1).replace(".", "").replace(",", "."))
+                price_spans = card.select("[class*='price'], [class*='Price'], [class*='currentPrice']")
+                for p_elem in price_spans:
+                    if is_strikethrough_or_old_price(p_elem):
+                        continue
+                    p_text = p_elem.get_text(strip=True)
+                    if is_financing_or_unit_price(p_text):
+                        continue
+                    parsed = parse_price(p_text)
+                    if parsed and parsed > 0:
+                        price = parsed
+                        break
 
                 if price == 0.0:
                     card_text = card.get_text(separator=" ")
-                    m_p = re.search(r"(\d+[\.,]\d{2})\s*€", card_text) or re.search(r"€\s*(\d+[\.,]\d{2})", card_text)
-                    if m_p:
-                        try:
-                            price = float(m_p.group(1).replace(".", "").replace(",", "."))
-                        except ValueError:
-                            price = 0.0
-
-                # URL directa al artículo individual
-                direct_url = f"{self.base_url}/item/{item_id}.html"
+                    if not is_financing_or_unit_price(card_text):
+                        m_p = re.search(r"(\d+(?:[\.,]\d{2})?)\s*€", card_text) or re.search(r"€\s*(\d+(?:[\.,]\d{2})?)", card_text)
+                        if m_p:
+                            price = parse_price(m_p.group(0)) or 0.0
 
                 results.append(
                     ProductResult(
@@ -115,7 +130,7 @@ class AliExpressEsProvider(BaseStoreProvider):
                         price=price,
                         store_name=self.store_name,
                         url=direct_url,
-                        in_stock=True,
+                        in_stock=in_stock,
                         ships_from_spain=True,
                     )
                 )

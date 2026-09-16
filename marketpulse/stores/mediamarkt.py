@@ -4,6 +4,13 @@ from typing import List
 from bs4 import BeautifulSoup
 from marketpulse.models import ProductResult, SearchCriteria
 from marketpulse.stores.base import BaseStoreProvider
+from marketpulse.core.pricing import (
+    parse_price,
+    is_financing_or_unit_price,
+    is_strikethrough_or_old_price,
+    is_sponsored_card,
+    is_out_of_stock,
+)
 
 
 class MediaMarktProvider(BaseStoreProvider):
@@ -54,15 +61,31 @@ class MediaMarktProvider(BaseStoreProvider):
                         if "€" in card.get_text():
                             break
 
+                # Descartar anuncios o tarjetas patrocinadas
+                if is_sponsored_card(card, clean_url):
+                    continue
+
+                in_stock = not is_out_of_stock(card)
+
                 price = 0.0
-                card_text = card.get_text(separator=" ")
-                m_p = re.search(r"(\d+(?:[\.,]\d{2})?)\s*€", card_text) or re.search(r"€\s*(\d+(?:[\.,]\d{2})?)", card_text)
-                if m_p:
-                    try:
-                        raw_p = m_p.group(1).replace(".", "").replace(",", ".")
-                        price = float(raw_p)
-                    except ValueError:
-                        price = 0.0
+                price_elems = card.select("[class*='price'], [class*='Price']")
+                for pe in price_elems:
+                    if is_strikethrough_or_old_price(pe):
+                        continue
+                    p_text = pe.get_text(strip=True)
+                    if is_financing_or_unit_price(p_text):
+                        continue
+                    parsed = parse_price(p_text)
+                    if parsed and parsed > 0:
+                        price = parsed
+                        break
+
+                if price == 0.0:
+                    card_text = card.get_text(separator=" ")
+                    if not is_financing_or_unit_price(card_text):
+                        m_p = re.search(r"(\d+(?:[\.,]\d{2})?)\s*€", card_text) or re.search(r"€\s*(\d+(?:[\.,]\d{2})?)", card_text)
+                        if m_p:
+                            price = parse_price(m_p.group(0)) or 0.0
 
                 results.append(
                     ProductResult(
@@ -70,7 +93,7 @@ class MediaMarktProvider(BaseStoreProvider):
                         price=price,
                         store_name=self.store_name,
                         url=clean_url,
-                        in_stock=True,
+                        in_stock=in_stock,
                         ships_from_spain=True
                     )
                 )
@@ -96,13 +119,11 @@ class MediaMarktProvider(BaseStoreProvider):
                             seen_urls.add(href)
                             title = a_elem.get_text(strip=True)
                             snippet = snippets[i].get_text(strip=True) if i < len(snippets) else ""
-                            m_p = re.search(r"(\d+(?:[\.,]\d{2})?)\s*€", snippet) or re.search(r"€\s*(\d+(?:[\.,]\d{2})?)", snippet)
                             price = 0.0
-                            if m_p:
-                                try:
-                                    price = float(m_p.group(1).replace(".", "").replace(",", "."))
-                                except ValueError:
-                                    price = 0.0
+                            if not is_financing_or_unit_price(snippet):
+                                m_p = re.search(r"(\d+(?:[\.,]\d{2})?)\s*€", snippet) or re.search(r"€\s*(\d+(?:[\.,]\d{2})?)", snippet)
+                                if m_p:
+                                    price = parse_price(m_p.group(0)) or 0.0
                             results.append(
                                 ProductResult(
                                     title=title,

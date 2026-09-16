@@ -155,6 +155,27 @@ Este documento registra todas las decisiones estratégicas, arquitectónicas y t
 * **Consecuencias:**
   Garantía matemática de que ningún artículo por encima del presupuesto (o sin precio comprobable) se muestre al usuario cuando se exige un límite presupuestario. Las búsquedas en comercios electrónicos ahora cubren la totalidad de los procesadores solicitados respetando sus respectivos techos de coste.
 
+---
+
+### ADR-0011: Normalización universal de precios numéricos y gestión de casos límite en comercio electrónico
+* **Fecha:** 2026-09-17
+* **Estado:** Aprobado
+* **Contexto:**
+  El scraping de precios en e-commerce afronta inconsistencias complejas: DOM fragmentado (ej. `.a-price-whole` + `.a-price-fraction` en Amazon), convenciones de formato geográfico (`1.139,00 €` vs `$1,139.00`), captura errónea de PVPs originales tachados (`<del>`, `.a-text-price`), cuotas de pago aplazado o financiación (`14,13 € / mes`), productos promocionados no orgánicos (anuncios patrocinados) y listados inactivos sin stock.
+* **Decisión:**
+  1. Crear un módulo centralizado `marketpulse.core.pricing` con la función universal `parse_price(raw_text)`:
+     - Detección precisa de separadores decimales y de miles: cuando coexisten punto y coma, el último actúa de separador decimal; con separador único, analiza la longitud del último bloque (2 dígitos = decimal, 3 dígitos = millares).
+     - Soporte para rangos de precio (`parse_price_range`).
+  2. Implementar detectores de casos límite:
+     - `is_financing_or_unit_price`: filtra y descarta textos que representan cuotas mensuales o precio por unidad (`/mes`, `/cuota`, `/kg`, `Cofidis`, `Klarna`, `Openbank Pay`).
+     - `is_strikethrough_or_old_price`: excluye elementos con `<del>`, `.a-text-price`, `.strike`, etc. para capturar únicamente el precio de venta activo con descuento aplicado.
+     - `is_sponsored_card`: identifica y descarta anuncios o tarjetas patrocinadas (`.s-sponsored-label`, `ad-container`, etc.).
+     - `is_out_of_stock`: detecta menciones de no disponibilidad (`Actualmente no disponible`, `Agotado`, etc.).
+  3. Refactorizar los 4 conectores de tienda (`AmazonEsProvider`, `AliExpressEsProvider`, `PcComponentesProvider`, `MediaMarktProvider`) para aplicar de forma sistemática este módulo de parseo y filtrado.
+* **Consecuencias:**
+  Extracción robusta de precios que previene lecturas truncadas, elimina falsos positivos de cuotas de financiación, ignora precios tachados desactualizados y garantiza que los precios comparados correspondan exactamente al importe real de compra del producto.
+
+
 
 
 

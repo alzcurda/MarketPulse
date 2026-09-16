@@ -4,6 +4,12 @@ from typing import List
 from bs4 import BeautifulSoup
 from marketpulse.models import ProductResult, SearchCriteria
 from marketpulse.stores.base import BaseStoreProvider
+from marketpulse.core.pricing import (
+    parse_price,
+    is_financing_or_unit_price,
+    is_sponsored_card,
+    is_out_of_stock,
+)
 
 
 class AmazonEsProvider(BaseStoreProvider):
@@ -63,26 +69,42 @@ class AmazonEsProvider(BaseStoreProvider):
                 if not title:
                     continue
 
+                # Descartar anuncios y productos patrocinados
+                if is_sponsored_card(item, f"{self.base_url}/dp/{asin}"):
+                    continue
+
                 seen_asins.add(asin)
                 direct_url = f"{self.base_url}/dp/{asin}"
 
-                # Extracción de precio
-                price = 0.0
-                price_offscreen = item.select_one(".a-price .a-offscreen")
-                raw_price = price_offscreen.get_text(strip=True) if price_offscreen else ""
+                # Comprobar disponibilidad de stock
+                in_stock = not is_out_of_stock(item)
 
+                # Extracción de precio activo (excluyendo precios tachados/PVP original .a-text-price)
+                raw_price = ""
+                price_offscreen = item.select_one(".a-price:not(.a-text-price) .a-offscreen")
+                if price_offscreen:
+                    raw_price = price_offscreen.get_text(strip=True)
+
+                # Si no está en .a-offscreen o el DOM está fragmentado (whole + fraction)
+                if not raw_price:
+                    whole = item.select_one(".a-price:not(.a-text-price) .a-price-whole")
+                    fraction = item.select_one(".a-price:not(.a-text-price) .a-price-fraction")
+                    if whole:
+                        frac_str = fraction.get_text(strip=True) if fraction else "00"
+                        raw_price = f"{whole.get_text(strip=True)}.{frac_str}"
+
+                # Fallback en strings visibles (evitando cuotas de financiación /mes)
                 if not raw_price:
                     for s in item.stripped_strings:
-                        if "€" in s or "eur" in s.lower():
+                        if ("€" in s or "eur" in s.lower()) and not is_financing_or_unit_price(s):
                             raw_price = s
                             break
 
-                price_match = re.search(r"(\d+[\.,]\d{2})", raw_price)
-                if price_match:
-                    try:
-                        price = float(price_match.group(1).replace(".", "").replace(",", "."))
-                    except ValueError:
-                        price = 0.0
+                # Descartar si el precio extraído era una cuota de financiación
+                if is_financing_or_unit_price(raw_price):
+                    raw_price = ""
+
+                price = parse_price(raw_price) or 0.0
 
                 # Porcentaje de descuento si existe oferta
                 discount = None
@@ -98,7 +120,7 @@ class AmazonEsProvider(BaseStoreProvider):
                         price=price,
                         store_name=self.store_name,
                         url=direct_url,
-                        in_stock=True,
+                        in_stock=in_stock,
                         ships_from_spain=True,
                         discount_percentage=discount
                     )
