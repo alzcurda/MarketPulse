@@ -174,6 +174,36 @@ class TestAggregator(unittest.TestCase):
         self.assertEqual(filtered[0].title, "MeLE Quieter4C Mini PC sin Ventilador N100 16GB 512GB Microordenador")
         self.assertEqual(filtered[0].url, "https://www.amazon.es/dp/B0CNV981QH")
 
+    def test_unknown_price_discarded_when_budget_set(self):
+        # Si el usuario establece un tope de presupuesto (ej: 330€), productos cuyo precio
+        # es desconocido (0.0 / 'Ver en tienda') deben descartarse para no colar equipos de 600€
+        unknown_price_prod = ProductResult(
+            title="Mini PC BLEU JOUR NUC VALUE Intel Core i3-1215U 16 GB RAM 512 GB SSD",
+            price=0.0,
+            store_name="MediaMarkt",
+            url="https://www.mediamarkt.es/es/product/example.html"
+        )
+        known_in_budget_prod = ProductResult(
+            title="Mini PC Beelink N100 16 GB RAM 512 GB SSD",
+            price=199.0,
+            store_name="Amazon España",
+            url="https://www.amazon.es/dp/B0EX"
+        )
+
+        criteria = SearchCriteria(
+            raw_query="mini pc i3 o n100 16gb 512gb hasta 330€",
+            clean_query="mini pc 16gb 512gb",
+            max_price=330.0,
+            allowed_cpus=["I3-1215U", "N100"],
+            min_ram_gb=16,
+            min_storage_gb=512
+        )
+
+        filtered = self.aggregator.filter_and_rank([unknown_price_prod, known_in_budget_prod], criteria)
+        self.assertEqual(len(filtered), 1)
+        self.assertEqual(filtered[0].title, "Mini PC Beelink N100 16 GB RAM 512 GB SSD")
+        self.assertEqual(filtered[0].price, 199.0)
+
 
 if __name__ == "__main__":
     unittest.main()

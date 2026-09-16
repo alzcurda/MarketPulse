@@ -27,15 +27,24 @@ class AliExpressEsProvider(BaseStoreProvider):
         return url
 
     def search(self, criteria: SearchCriteria) -> List[ProductResult]:
-        queries = criteria.target_search_queries[:2] if criteria.target_search_queries else [criteria.clean_query]
+        queries = criteria.target_search_queries[:6] if criteria.target_search_queries else [criteria.clean_query]
         results: List[ProductResult] = []
         seen_items = set()
 
         for q in queries:
             query_encoded = urllib.parse.quote_plus(q)
             search_url = f"{self.base_url}/w/wholesale-{query_encoded}.html?shipFromCountry=ES"
-            if criteria.max_price:
-                search_url += f"&maxPrice={int(criteria.max_price)}"
+            
+            # Ajustar precio máximo según la CPU de la sub-query si existe regla condicional
+            query_max_price = criteria.max_price
+            if criteria.max_price_by_cpu:
+                for cpu_key, p_max in criteria.max_price_by_cpu.items():
+                    if cpu_key.lower() in q.lower():
+                        query_max_price = p_max
+                        break
+
+            if query_max_price:
+                search_url += f"&maxPrice={int(query_max_price)}"
             if criteria.min_price:
                 search_url += f"&minPrice={int(criteria.min_price)}"
 

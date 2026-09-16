@@ -141,5 +141,20 @@ Este documento registra todas las decisiones estratégicas, arquitectónicas y t
 * **Consecuencias:**
   Salida de consola robusta, sin cortes de ejecución en Windows, y accesibilidad total a los enlaces directos tanto mediante clic interactivo como mediante selección y copia en el portapapeles.
 
+---
+
+### ADR-0010: Exclusión de precios no verificados bajo presupuesto explícito y segmentación dirigida por CPU
+* **Fecha:** 2026-09-16
+* **Estado:** Aprobado
+* **Contexto:**
+  Cuando las tiendas aplican desafíos antibot y se recurre a índices de búsqueda secundarios, ciertas fichas de producto se recuperaban sin precio (`price = 0.0` / "Ver en tienda"). En `Aggregator`, la regla de comprobación `prod.price > max_price` resultaba `False` ante `0.0`, lo que permitía que equipos de 500€ o 600€ se colaran en los resultados finales eludiendo los topes de presupuesto de 230€ y 330€. Asimismo, las consultas segmentadas truncaban la lista de CPUs (`[:3]`), omitiendo búsquedas de N100 y N150 en Amazon y AliExpress.
+* **Decisión:**
+  1. En `Aggregator`: descartar automáticamente cualquier artículo con precio desconocido o nulo (`price <= 0.0`) cuando el usuario haya fijado un presupuesto máximo (general o condicional por CPU). De este modo, únicamente se presentarán productos con precio comprobado dentro del rango solicitado.
+  2. En `CriteriaAdvisor`: ordenar los modelos de CPU permitidos según su orden de aparición en el texto del usuario y expandir el límite de consultas dirigidas a 6 variantes sin omitir chips de menor presupuesto.
+  3. En `AmazonEsProvider` y `AliExpressEsProvider`: procesar hasta 6 consultas segmentadas aplicando dinámicamente el precio máximo condicional asociado al modelo concreto de procesador en cada consulta (ej. 230€ para N100/N150 y 330€ para i3).
+* **Consecuencias:**
+  Garantía matemática de que ningún artículo por encima del presupuesto (o sin precio comprobable) se muestre al usuario cuando se exige un límite presupuestario. Las búsquedas en comercios electrónicos ahora cubren la totalidad de los procesadores solicitados respetando sus respectivos techos de coste.
+
+
 
 

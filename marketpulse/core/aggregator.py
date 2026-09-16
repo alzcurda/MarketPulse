@@ -125,6 +125,12 @@ class Aggregator:
                         if max_found_disk >= 64 and max_found_disk < criteria.min_storage_gb:
                             continue
 
+            # Si el usuario ha fijado un presupuesto (general o condicional por CPU),
+            # descartamos artículos con precio desconocido (0.0 / "Ver en tienda")
+            # para evitar colar productos de 500€-600€ que violan el presupuesto del usuario.
+            if (criteria.max_price or criteria.max_price_by_cpu) and prod.price <= 0.0:
+                continue
+
             # Filtro de precios condicionales por CPU
             if criteria.max_price_by_cpu and detected_cpu:
                 exceeded_cpu_price = False

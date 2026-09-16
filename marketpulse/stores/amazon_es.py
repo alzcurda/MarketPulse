@@ -22,15 +22,24 @@ class AmazonEsProvider(BaseStoreProvider):
         return url
 
     def search(self, criteria: SearchCriteria) -> List[ProductResult]:
-        queries = criteria.target_search_queries[:3] if criteria.target_search_queries else [criteria.clean_query]
+        queries = criteria.target_search_queries[:6] if criteria.target_search_queries else [criteria.clean_query]
         results: List[ProductResult] = []
         seen_asins = set()
 
         for q in queries:
             query_encoded = urllib.parse.quote_plus(q)
             search_url = f"{self.base_url}/s?k={query_encoded}"
-            if criteria.max_price:
-                search_url += f"&rh=p_36%3A-{int(criteria.max_price * 100)}"
+            
+            # Ajustar precio máximo según la CPU de la sub-query si existe regla condicional
+            query_max_price = criteria.max_price
+            if criteria.max_price_by_cpu:
+                for cpu_key, p_max in criteria.max_price_by_cpu.items():
+                    if cpu_key.lower() in q.lower():
+                        query_max_price = p_max
+                        break
+
+            if query_max_price:
+                search_url += f"&rh=p_36%3A-{int(query_max_price * 100)}"
 
             html = self.get_browser_html(search_url, wait_timeout_ms=1800)
             if not html:

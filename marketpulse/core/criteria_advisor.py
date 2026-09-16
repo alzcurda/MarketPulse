@@ -184,21 +184,29 @@ class CriteriaAdvisor:
         return found_specs
 
     def extract_allowed_cpus(self, text: str) -> List[str]:
-        """Detecta modelos específicos de CPU requeridos por el usuario."""
+        """Detecta modelos específicos de CPU requeridos por el usuario, preservando el orden de mención."""
         text_upper = text.upper()
-        allowed = []
+        found = []
 
         patterns = [
             r"\b(I[3579]-(?:1[2-4]\d{2}[A-Z]*|N\d{3}))\b",
-            r"\b(I3-N305|N305)\b",
+            r"\b(I3-N305)\b",
+            r"\b(N305)\b",
             r"\b(N\d{2,3})\b",
         ]
 
         for pat in patterns:
             for m in re.finditer(pat, text_upper):
                 val = m.group(1).strip()
-                if val not in allowed:
-                    allowed.append(val)
+                found.append((m.start(), val))
+
+        found.sort(key=lambda x: x[0])
+        allowed = []
+        for _, val in found:
+            if val == "N305" and "I3-N305" in allowed:
+                continue
+            if val not in allowed:
+                allowed.append(val)
 
         return allowed
 
@@ -248,14 +256,18 @@ class CriteriaAdvisor:
                 exclude_list.append(chip)
 
         # Configuraciones de RAM y disco descartadas
-        for m in re.finditer(r"\b(\d{1,2})\s*gb\s*(?:de\s*)?ram\b", text_lower):
-            exclude_list.extend([f"{m.group(1)}gb", f"{m.group(1)} gb"])
-        for m in re.finditer(r"\b(\d{2,3})\s*gb\s*(?:de\s*)?(?:disco|ssd)\b", text_lower):
-            exclude_list.extend([f"{m.group(1)}gb", f"{m.group(1)} gb"])
+        if re.search(r"\b8\s*gb\b", text_lower):
+            exclude_list.append("8gb")
+        if re.search(r"\b256\s*gb\b", text_lower):
+            exclude_list.append("256gb")
+        if re.search(r"\b128\s*gb\b", text_lower):
+            exclude_list.append("128gb")
 
-        # Orígenes descartados
-        if re.search(r"amazon\s*us|fuera\s*(?:de\s*)?la\s*ue", text_lower):
-            exclude_list.extend(["amazon us", "importacion"])
+        # Procedencias no deseadas
+        if "amazon us" in text_lower or "estados unidos" in text_lower:
+            exclude_list.append("amazon us")
+        if "fuera de la ue" in text_lower or "importacion" in text_lower:
+            exclude_list.append("importación")
 
         return exclude_list
 
@@ -265,36 +277,29 @@ class CriteriaAdvisor:
         nfkd_form = unicodedata.normalize('NFKD', text)
         return "".join([c for c in nfkd_form if not unicodedata.combining(c)])
 
-    def clean_search_query(self, text: str, category: ProductCategory) -> str:
-        """
-        Convierte una petición conversacional en una query compacta y efectiva para buscadores de tiendas.
-        Descarta previamente cualquier cláusula negativa/de exclusión.
-        """
-        # Separar y quedarse solo con la parte positiva
-        exclusion_markers = r"\b(?:descartando|excluyendo|evitando|sin\s+(?:procesador|equipos?|marcas?|amd|celeron)|no\s+quiero|nada\s+de|quitar|obviar)\b"
-        parts = re.split(exclusion_markers, text, flags=re.I)
-        positive_text = parts[0]
+    def clean_search_query(self, raw_query: str, category: ProductCategory) -> str:
+        """Limpia la consulta dejando únicamente los términos clave positivos de búsqueda."""
+        # 1. Eliminar cláusulas de exclusión
+        exclusion_split = re.split(r"\b(?:descartando|excluyendo|evitando|sin\s+(?:procesador|equipos?|marcas?|amd|celeron)|no\s+quiero|nada\s+de)\b", raw_query, flags=re.I)
+        text_to_clean = exclusion_split[0]
 
-        # Normalizar tildes
-        text_normalized = self.strip_accents(positive_text.lower())
+        # 2. Eliminar referencias de precio de la query de texto
+        text_no_price = re.sub(r"(?:precio máximo de|hasta|máximo|presupuesto de?|menos de)\s*\d+[\.,]?\d*\s*€?", "", text_to_clean, flags=re.I)
+        text_no_price = re.sub(r"\d+[\.,]?\d*\s*(?:€|euros)", "", text_no_price, flags=re.I)
 
-        # Limpiar referencias temporales como 24/7
-        cleaned = re.sub(r"\b24\s*/\s*7\b", "", text_normalized)
+        # Normalizar acentos y caracteres
+        text_normalized = unicodedata.normalize('NFKD', text_no_price).encode('ASCII', 'ignore').decode('utf-8')
+        text_clean = re.sub(r"[^\w\s-]", " ", text_clean_str := text_normalized.lower())
 
-        # Palabras de relleno coloquial
-        filler_words = [
-            "hola", "quiero", "busco", "necesito", "un", "una", "unos", "unas", "para", "que", "tenga",
-            "sea", "bueno", "bonito", "barato", "comprar", "encontrar", "sobre", "alrededor", "de",
-            "euros", "euro", "por favor", "me gustaria", "estoy buscando", "trabajar", "programar",
-            "unicamente", "solamente", "solo", "con", "al", "menos", "como", "minimo", "desde",
-            "envio", "nacional", "union", "europea", "ue"
-        ]
+        filler_words = {
+            "hola", "busco", "necesito", "quiero", "comprar", "encontrar", "dime", "para", "con",
+            "bueno", "bonito", "barato", "calidad", "precio", "euros", "euro", "presupuesto",
+            "un", "una", "unos", "unas", "el", "la", "los", "las", "de", "en", "por", "que",
+            "tenga", "tengan", "minimo", "como", "al", "menos", "desde", "hasta", "envio",
+            "nacional", "espana", "union", "europea", "ue", "cueste", "cuesta"
+        }
 
-        # Quitar rangos de precio
-        cleaned = re.sub(r"(?:menos de|hasta|maximo|entre|a partir de|minimo)\s*\d+.*?(?:€|euros)?", "", cleaned)
-        cleaned = re.sub(r"\d+\s*(?:€|euros)", "", cleaned)
-
-        words = re.findall(r"[a-zA-Z0-9]+", cleaned)
+        words = text_clean.split()
         filtered_words = [
             w for w in words
             if w not in filler_words and len(w) > 1 and not (w.isdigit() and len(w) <= 2)
@@ -323,8 +328,7 @@ class CriteriaAdvisor:
 
         queries = []
         if allowed_cpus:
-            # Agrupar chips para consultas eficaces
-            for cpu in allowed_cpus[:4]:
+            for cpu in allowed_cpus[:6]:
                 q_parts = [base_product, cpu.lower()]
                 if ram_str:
                     q_parts.append(ram_str)
