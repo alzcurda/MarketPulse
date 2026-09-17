@@ -210,6 +210,76 @@ class CriteriaAdvisor:
 
         return allowed
 
+    @staticmethod
+    def generate_model_variants(raw_model: str) -> List[str]:
+        """Genera variantes normalizadas de un código de modelo (ej: EQi12, EQi-12, EQI 12)."""
+        norm = raw_model.lower().strip()
+        clean = re.sub(r"[^a-z0-9]", "", norm)
+        variants = {norm, clean}
+
+        # Separar letras y números con guion y espacio (ej. eqi12 -> eqi-12, eqi 12)
+        m = re.match(r"^([a-z]+)(\d+.*)$", clean)
+        if m:
+            variants.add(f"{m.group(1)}-{m.group(2)}")
+            variants.add(f"{m.group(1)} {m.group(2)}")
+
+        if " " in norm:
+            variants.add(norm.replace(" ", "-"))
+            variants.add(norm.replace(" ", ""))
+        if "-" in norm:
+            variants.add(norm.replace("-", " "))
+            variants.add(norm.replace("-", ""))
+
+        return sorted(list(variants))
+
+    def extract_target_model(self, text: str) -> Tuple[Optional[str], List[str]]:
+        """
+        Detecta identificadores o códigos de modelo específicos solicitados por el usuario
+        (ej: EQi12, S12 Pro, NucBox G3, MP100 Pro, SER5, Cubi 5) y genera sus variantes normalizadas.
+        """
+        exclusion_split = re.split(
+            r"\b(?:descartando|excluyendo|evitando|sin\s+(?:procesador|equipos?|marcas?|amd|celeron)|no\s+quiero|nada\s+de)\b",
+            text,
+            flags=re.I,
+        )
+        text_positive = exclusion_split[0]
+
+        known_non_models = {
+            "n100", "n150", "n95", "n5095", "n5105", "n2940", "n2840", "j4125", "j3355",
+            "16gb", "32gb", "64gb", "8gb", "4gb", "12gb", "512gb", "256gb", "128gb", "1tb", "2tb",
+            "windows", "win11", "win10", "ddr4", "ddr5", "wifi", "bluetooth", "hdmi", "usb",
+            "intel", "amd", "ryzen", "core", "celeron", "pentium", "geforce", "radeon",
+            "portatil", "laptop", "sobremesa", "ordenador", "pc", "mini", "minipc", "desktop"
+        }
+
+        model_patterns = [
+            r"\b(NucBox\s*[A-Z0-9]+)\b",
+            r"\b(Mini\s*S(?:12)?(?:\s*Pro)?)\b",
+            r"\b(S12\s*Pro)\b",
+            r"\b(EQi-?\s*\d{1,2}(?:\s*Pro)?)\b",
+            r"\b(EQ-?\s*\d{1,2}(?:\s*Pro)?)\b",
+            r"\b(SE[iR]-?\s*\d{1,2}(?:\s*Pro|\s*Max)?)\b",
+            r"\b(MP\d{2,3}(?:\s*Pro)?)\b",
+            r"\b(Cubi\s*\d{1,2}[A-Za-z0-9-]*)\b",
+            r"\b([A-Z]{1,3}\d{1,3}\s*(?:Pro|Plus|Max|Ultra|Air)?)\b",
+        ]
+
+        for pat in model_patterns:
+            for m in re.finditer(pat, text_positive, flags=re.I):
+                raw_model = m.group(1).strip()
+                norm_check = raw_model.lower().replace(" ", "").replace("-", "")
+                if norm_check in known_non_models or re.match(r"^i[3579]$", norm_check):
+                    continue
+                if re.match(r"^(?:n\d{2,3}|16gb|512gb|1tb)$", norm_check):
+                    continue
+                if len(norm_check) < 3:
+                    continue
+
+                variants = self.generate_model_variants(raw_model)
+                return raw_model, variants
+
+        return None, []
+
     def extract_hardware_limits(self, text: str) -> Tuple[Optional[int], Optional[int]]:
         """Extrae requisitos mínimos de RAM (GB) y almacenamiento SSD (GB)."""
         text_lower = text.lower()
@@ -318,7 +388,14 @@ class CriteriaAdvisor:
 
         return result
 
-    def build_targeted_queries(self, clean_query: str, allowed_cpus: List[str], min_ram_gb: Optional[int], min_storage_gb: Optional[int]) -> List[str]:
+    def build_targeted_queries(
+        self,
+        clean_query: str,
+        allowed_cpus: List[str],
+        min_ram_gb: Optional[int],
+        min_storage_gb: Optional[int],
+        target_model: Optional[str] = None
+    ) -> List[str]:
         """
         Construye consultas segmentadas de alta precisión para los buscadores de las tiendas.
         """
@@ -327,6 +404,13 @@ class CriteriaAdvisor:
         storage_str = f"{min_storage_gb}gb" if min_storage_gb else ""
 
         queries = []
+        if target_model:
+            model_clean = target_model.lower()
+            queries.append(f"{base_product} {model_clean}")
+            if ram_str:
+                queries.append(f"{base_product} {model_clean} {ram_str}")
+            queries.append(model_clean)
+
         if allowed_cpus:
             for cpu in allowed_cpus[:6]:
                 q_parts = [base_product, cpu.lower()]
@@ -334,8 +418,10 @@ class CriteriaAdvisor:
                     q_parts.append(ram_str)
                 if storage_str and min_storage_gb and min_storage_gb >= 512:
                     q_parts.append(storage_str)
-                queries.append(" ".join(q_parts))
-        else:
+                q_str = " ".join(q_parts)
+                if q_str not in queries:
+                    queries.append(q_str)
+        elif not queries:
             queries.append(clean_query)
 
         return queries
@@ -356,6 +442,9 @@ class CriteriaAdvisor:
         if max_price_by_cpu and (max_price is None or max(max_price_by_cpu.values()) > max_price):
             max_price = max(max_price_by_cpu.values())
 
+        # Extraer modelo específico si el usuario lo solicita
+        target_model, target_model_variants = self.extract_target_model(positive_text)
+
         # Extraer CPUs permitidas y límites de hardware
         allowed_cpus = self.extract_allowed_cpus(positive_text)
         min_ram_gb, min_storage_gb = self.extract_hardware_limits(positive_text)
@@ -370,7 +459,9 @@ class CriteriaAdvisor:
         clean_query = self.clean_search_query(prompt, category)
 
         # Consultas dirigidas segmentadas
-        target_queries = self.build_targeted_queries(clean_query, allowed_cpus, min_ram_gb, min_storage_gb)
+        target_queries = self.build_targeted_queries(
+            clean_query, allowed_cpus, min_ram_gb, min_storage_gb, target_model=target_model
+        )
 
         return SearchCriteria(
             raw_query=prompt,
@@ -386,6 +477,9 @@ class CriteriaAdvisor:
             allowed_cpus=allowed_cpus,
             max_price_by_cpu=max_price_by_cpu,
             target_search_queries=target_queries,
+            target_model=target_model,
+            target_model_variants=target_model_variants,
+            min_score_threshold=80.0,
             ships_from_spain_only=True,
             in_stock_only=True,
         )

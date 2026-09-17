@@ -14,6 +14,10 @@ Este documento registra todas las decisiones estratégicas, arquitectónicas y t
 6. [ADR-0006: Registro estructurado de decisiones en repositorio (`docs/`)](#adr-0006-registro-estructurado-de-decisiones-en-repositorio-docs)
 7. [ADR-0007: Extracción directa de artículos individuales y eliminación de enlaces sustitutivos de búsqueda](#adr-0007-extracción-directa-de-artículos-individuales-y-eliminación-de-enlaces-sustitutivos-de-búsqueda)
 8. [ADR-0008: Filtrado estricto de especificaciones técnicas, exclusiones negativas y límites condicionales](#adr-0008-filtrado-estricto-de-especificaciones-técnicas-exclusiones-negativas-y-límites-condicionales)
+9. [ADR-0009: Formateo no truncado de enlaces y panel desacoplado de URLs directas](#adr-0009-formateo-no-truncado-de-enlaces-y-panel-desacoplado-de-urls-directas)
+10. [ADR-0010: Exclusión de precios no verificados bajo presupuesto explícito y segmentación dirigida por CPU](#adr-0010-exclusión-de-precios-no-verificados-bajo-presupuesto-explícito-y-segmentación-dirigida-por-cpu)
+11. [ADR-0011: Normalización universal de precios numéricos y gestión de casos límite en comercio electrónico](#adr-0011-normalización-universal-de-precios-numéricos-y-gestión-de-casos-límite-en-comercio-electrónico)
+12. [ADR-0012: Coincidencia obligatoria de modelo (token match), aislamiento de categoría, sensatez de hardware y umbral de afinidad](#adr-0012-coincidencia-obligatoria-de-modelo-token-match-aislamiento-de-categoría-sensatez-de-hardware-y-umbral-de-afinidad)
 
 ---
 
@@ -174,6 +178,29 @@ Este documento registra todas las decisiones estratégicas, arquitectónicas y t
   3. Refactorizar los 4 conectores de tienda (`AmazonEsProvider`, `AliExpressEsProvider`, `PcComponentesProvider`, `MediaMarktProvider`) para aplicar de forma sistemática este módulo de parseo y filtrado.
 * **Consecuencias:**
   Extracción robusta de precios que previene lecturas truncadas, elimina falsos positivos de cuotas de financiación, ignora precios tachados desactualizados y garantiza que los precios comparados correspondan exactamente al importe real de compra del producto.
+
+---
+
+### ADR-0012: Coincidencia obligatoria de modelo (token match), aislamiento de categoría, sensatez de hardware y umbral de afinidad
+* **Fecha:** 2026-09-17
+* **Estado:** Aprobado
+* **Contexto:**
+  En búsquedas de modelos específicos de hardware (ej. Beelink EQi12, S12 Pro, NucBox G3), los motores de las tiendas con frecuencia rellenan resultados con modelos colaterales de la misma marca (SER3, SER5, EQ14, etc.) o con artículos fuera de la categoría informática (campanas extractoras, electrodomésticos, videojuegos). Asimismo, se detectaban accesorios (docks de eGPU, carcasas disipadoras, soportes VESA) a precios bajos etiquetados con procesadores de gama alta (Core Ultra, i9, Ryzen 9), falseando los precios de mercado.
+* **Decisión:**
+  1. **Política de Coincidencia de Modelo (Token Match Obligatorio):**
+     - Si la consulta incluye un identificador o código de modelo, `CriteriaAdvisor` extrae dicho token y genera automáticamente sus variantes normalizadas con guiones, espacios y compactas (ej. `['eqi 12', 'eqi-12', 'eqi12']`).
+     - En `Aggregator`, si se define un modelo objetivo, el título del producto debe contener obligatoriamente dicho token delimitado por fronteras alfanuméricas. Si no coincide, se descarta de inmediato; queda estrictamente prohibido rellenar con otros modelos de la misma marca.
+  2. **Aislamiento de Categoría (Category Isolation):**
+     - Para categorías de ordenadores y portátiles, se descartan de forma terminante productos ajenos (campanas extractoras, lavadoras, frigoríficos, cafeteras, aspiradoras, videojuegos de consolas, libros, fundas de móvil, patinetes, etc.).
+  3. **Control de Sensatez de Precios vs Hardware y Filtro de Accesorios:**
+     - Procesadores de gama alta o profesionales (Intel Core Ultra, Core i9, AMD Ryzen 9, Ryzen AI Max, Xeon, Threadripper) con un precio inferior a 400 € son descartados de inmediato como docks, carcasas o anomalías.
+     - Se eliminan de forma sistemática accesorios no solicitados: `dock`, `docking station`, `estación de acoplamiento`, `carcasa`, `caja vacía`, `soporte vesa`, `adaptador vesa`, etc.
+  4. **Umbral de Corte de Afinidad (Score Threshold >= 80%):**
+     - Cualquier resultado con puntuación inferior al 80% es purgado y no se muestra en la tabla final.
+     - Si ninguna tienda ofrece el modelo exacto buscado, el CLI devuelve un aviso explícito: *"Sin stock o sin coincidencias exactas para el modelo solicitado"*.
+* **Consecuencias:**
+  Eliminación total de resultados colaterales, falsos positivos de accesorios y artículos ajenos a la informática. Las tablas comparativas ahora ofrecen precisión quirúrgica en búsquedas por modelo y aseguran un estándar de afinidad mínimo del 80%.
+
 
 
 

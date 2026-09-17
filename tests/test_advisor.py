@@ -83,5 +83,19 @@ class TestCriteriaAdvisor(unittest.TestCase):
         self.assertNotIn("celeron", criteria.clean_query.lower())
 
 
+    def test_target_model_extraction_and_variants(self):
+        prompt = "Busca el mini PC Beelink EQi12 con 16GB de RAM y 512GB SSD por menos de 400€"
+        criteria = self.advisor.analyze_user_prompt(prompt)
+
+        self.assertEqual(criteria.target_model, "EQi12")
+        self.assertIn("eqi 12", criteria.target_model_variants)
+        self.assertIn("eqi-12", criteria.target_model_variants)
+        self.assertIn("eqi12", criteria.target_model_variants)
+        self.assertEqual(criteria.min_score_threshold, 80.0)
+
+        # Las consultas dirigidas deben contener el modelo objetivo
+        self.assertTrue(any("eqi12" in q for q in criteria.target_search_queries))
+
+
 if __name__ == "__main__":
     unittest.main()

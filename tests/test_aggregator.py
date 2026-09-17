@@ -40,13 +40,13 @@ class TestAggregator(unittest.TestCase):
     def test_deduplication_by_url(self):
         products = [
             ProductResult(
-                title="Portátil HP 15",
+                title="Portátil HP 15 16GB RAM",
                 price=600.0,
                 store_name="PcComponentes",
                 url="https://example.com/item1"
             ),
             ProductResult(
-                title="Portátil HP 15 duplicado",
+                title="Portátil HP 15 16GB RAM duplicado",
                 price=600.0,
                 store_name="PcComponentes",
                 url="https://example.com/item1"
@@ -204,6 +204,232 @@ class TestAggregator(unittest.TestCase):
         self.assertEqual(filtered[0].title, "Mini PC Beelink N100 16 GB RAM 512 GB SSD")
         self.assertEqual(filtered[0].price, 199.0)
 
+    def test_mandatory_model_token_match(self):
+        # Política de Coincidencia de Modelo Obligatoria (EQi12)
+        criteria = SearchCriteria(
+            raw_query="Beelink EQi12 16GB RAM 512GB SSD",
+            clean_query="mini pc eqi12 16gb 512gb",
+            category=ProductCategory.PC_COMPONENTS,
+            target_model="EQi12",
+            target_model_variants=["eqi 12", "eqi-12", "eqi12"],
+            min_ram_gb=16,
+            min_storage_gb=512,
+            min_score_threshold=80.0
+        )
+
+        candidates = [
+            # 1. Variante con guión: EQi-12 -> debe ser admitida
+            ProductResult(
+                title="Beelink Mini PC EQi-12 Intel Core i3-1220P 16GB RAM 512GB SSD",
+                price=329.0,
+                store_name="Amazon España",
+                url="https://amazon.es/dp/eqi12-dash"
+            ),
+            # 2. Variante con espacio: EQI 12 -> debe ser admitida
+            ProductResult(
+                title="Beelink EQI 12 Mini PC Intel Core i5-12450H 16GB RAM 512GB SSD",
+                price=389.0,
+                store_name="PcComponentes",
+                url="https://pccomponentes.com/eqi12-space"
+            ),
+            # 3. Variante compacta: EQi12 -> debe ser admitida
+            ProductResult(
+                title="Beelink EQi12 Mini Ordenador Intel Core i7 16GB RAM 512GB SSD",
+                price=429.0,
+                store_name="AliExpress Plaza (España)",
+                url="https://aliexpress.com/eqi12-compact"
+            ),
+            # 4. Otro modelo de la misma marca: EQ14 -> PROHIBIDO / DESCARTADO
+            ProductResult(
+                title="Beelink EQ14 Mini PC Intel N150 16GB RAM 512GB SSD",
+                price=219.0,
+                store_name="Amazon España",
+                url="https://amazon.es/dp/eq14"
+            ),
+            # 5. Otro modelo de la misma marca: SER5 -> PROHIBIDO / DESCARTADO
+            ProductResult(
+                title="Beelink SER5 Mini PC AMD Ryzen 5 5560U 16GB RAM 512GB SSD",
+                price=289.0,
+                store_name="Amazon España",
+                url="https://amazon.es/dp/ser5"
+            ),
+            # 6. Otro modelo de la misma marca: Mini S12 -> PROHIBIDO / DESCARTADO
+            ProductResult(
+                title="Beelink Mini S12 Pro Intel N100 16GB RAM 512GB SSD",
+                price=189.0,
+                store_name="Amazon España",
+                url="https://amazon.es/dp/s12pro"
+            ),
+        ]
+
+        filtered = self.aggregator.filter_and_rank(candidates, criteria)
+        self.assertEqual(len(filtered), 3)
+        # Verificar que solo entraron las 3 variantes exactas de EQi12
+        matched_urls = [p.url for p in filtered]
+        self.assertIn("https://amazon.es/dp/eqi12-dash", matched_urls)
+        self.assertIn("https://pccomponentes.com/eqi12-space", matched_urls)
+        self.assertIn("https://aliexpress.com/eqi12-compact", matched_urls)
+
+    def test_empty_results_when_no_exact_model_match(self):
+        # Si ninguna tienda ofrece el modelo exacto buscado, la lista resultante debe ser vacía
+        criteria = SearchCriteria(
+            raw_query="Beelink EQi12",
+            clean_query="mini pc eqi12",
+            category=ProductCategory.PC_COMPONENTS,
+            target_model="EQi12",
+            target_model_variants=["eqi 12", "eqi-12", "eqi12"],
+            min_score_threshold=80.0
+        )
+
+        candidates = [
+            ProductResult(
+                title="Beelink SER5 Pro Mini PC AMD Ryzen 7 5800H 16GB RAM",
+                price=320.0,
+                store_name="Amazon España",
+                url="https://amazon.es/dp/ser5"
+            ),
+            ProductResult(
+                title="Beelink EQ14 Intel Twin Lake N150 Mini PC",
+                price=210.0,
+                store_name="MediaMarkt",
+                url="https://mediamarkt.es/eq14"
+            )
+        ]
+
+        filtered = self.aggregator.filter_and_rank(candidates, criteria)
+        self.assertEqual(len(filtered), 0)
+
+    def test_category_isolation(self):
+        # En categorías de informática, productos ajenos (electrodomésticos, consolas, videojuegos) deben ser purgados
+        criteria = SearchCriteria(
+            raw_query="Mini PC Intel 16GB",
+            clean_query="mini pc 16gb",
+            category=ProductCategory.PC_COMPONENTS,
+            min_score_threshold=80.0
+        )
+
+        candidates = [
+            ProductResult(
+                title="Campana extractora decorativa CATA 60cm acero inoxidable",
+                price=149.0,
+                store_name="MediaMarkt",
+                url="https://mediamarkt.es/campana"
+            ),
+            ProductResult(
+                title="Lavadora Balay 8kg 1200rpm blanco",
+                price=389.0,
+                store_name="MediaMarkt",
+                url="https://mediamarkt.es/lavadora"
+            ),
+            ProductResult(
+                title="Videojuego EA Sports FC 24 PS5",
+                price=59.99,
+                store_name="Amazon España",
+                url="https://amazon.es/juego"
+            ),
+            ProductResult(
+                title="Smartwatch Xiaomi Redmi Watch 4 pantalla AMOLED",
+                price=79.0,
+                store_name="PcComponentes",
+                url="https://pccomponentes.com/watch"
+            ),
+            ProductResult(
+                title="Mini PC Intel N100 16GB RAM 512GB SSD Windows 11",
+                price=189.0,
+                store_name="PcComponentes",
+                url="https://pccomponentes.com/minipc-real"
+            )
+        ]
+
+        filtered = self.aggregator.filter_and_rank(candidates, criteria)
+        self.assertEqual(len(filtered), 1)
+        self.assertEqual(filtered[0].title, "Mini PC Intel N100 16GB RAM 512GB SSD Windows 11")
+
+    def test_price_vs_hardware_sanity_check(self):
+        # CPUs de gama alta / profesionales (Core Ultra, i9, Ryzen 9, Ryzen AI Max) no pueden costar < 400€
+        criteria = SearchCriteria(
+            raw_query="Mini PC de alto rendimiento",
+            clean_query="mini pc alto rendimiento",
+            category=ProductCategory.PC_COMPONENTS,
+            min_score_threshold=80.0
+        )
+
+        candidates = [
+            # Core Ultra a 189€ -> imposible para un mini PC completo (es dock o error) -> descartar
+            ProductResult(
+                title="Mini PC Intel Core Ultra 7 155H 32GB RAM 1TB SSD",
+                price=189.0,
+                store_name="Amazon España",
+                url="https://amazon.es/ultra7-cheap"
+            ),
+            # Core i9 a 220€ -> descartar
+            ProductResult(
+                title="Mini PC Intel Core i9-13900H 32GB RAM 1TB SSD",
+                price=220.0,
+                store_name="Amazon España",
+                url="https://amazon.es/i9-cheap"
+            ),
+            # Ryzen AI Max a 199€ -> descartar
+            ProductResult(
+                title="Mini PC AMD Ryzen AI Max 395 32GB RAM",
+                price=199.0,
+                store_name="Amazon España",
+                url="https://amazon.es/ryzen-ai-cheap"
+            ),
+            # Mini PC Core Ultra a precio normal de mercado (699€) -> válido
+            ProductResult(
+                title="Mini PC alto rendimiento Intel Core Ultra 7 155H 32GB RAM 1TB SSD",
+                price=699.0,
+                store_name="PcComponentes",
+                url="https://pccomponentes.com/ultra7-real"
+            ),
+        ]
+
+        filtered = self.aggregator.filter_and_rank(candidates, criteria)
+        self.assertEqual(len(filtered), 1)
+        self.assertEqual(filtered[0].url, "https://pccomponentes.com/ultra7-real")
+
+    def test_accessory_strict_filtering(self):
+        # Docks, cajas vacías y soportes vesa deben descartarse automáticamente
+        criteria = SearchCriteria(
+            raw_query="Mini PC Intel",
+            clean_query="mini pc intel",
+            category=ProductCategory.PC_COMPONENTS,
+            min_score_threshold=80.0
+        )
+
+        candidates = [
+            ProductResult(
+                title="Estación de acoplamiento Docking Station triple monitor para Mini PC",
+                price=69.0,
+                store_name="Amazon España",
+                url="https://amazon.es/dock"
+            ),
+            ProductResult(
+                title="Carcasa vacía de aluminio disipadora para Mini PC N100",
+                price=25.0,
+                store_name="AliExpress Plaza (España)",
+                url="https://aliexpress.com/caja"
+            ),
+            ProductResult(
+                title="Soporte VESA de montaje en pared para Mini PC",
+                price=15.0,
+                store_name="PcComponentes",
+                url="https://pccomponentes.com/vesa"
+            ),
+            ProductResult(
+                title="Mini PC Intel N100 16GB RAM 512GB SSD",
+                price=199.0,
+                store_name="Amazon España",
+                url="https://amazon.es/minipc"
+            )
+        ]
+
+        filtered = self.aggregator.filter_and_rank(candidates, criteria)
+        self.assertEqual(len(filtered), 1)
+        self.assertEqual(filtered[0].url, "https://amazon.es/minipc")
+
 
 if __name__ == "__main__":
     unittest.main()
+

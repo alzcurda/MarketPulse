@@ -152,7 +152,10 @@ def run_interactive_session():
     # 6. Presentación de resultados
     console.print("\n[bold yellow]4. Resultados y Comparativa de Mercado:[/bold yellow]")
     if not ranked_results:
-        console.print("[red]No se encontraron productos que coincidan con los criterios establecidos.[/red]")
+        if criteria.target_model:
+            console.print("[yellow]Sin stock o sin coincidencias exactas para el modelo solicitado.[/yellow]")
+        else:
+            console.print("[yellow]Sin stock o sin coincidencias exactas que alcancen el umbral de afinidad requerido (mínimo 80%).[/yellow]")
         return
 
     res_table = Table(show_header=True, header_style="bold magenta", expand=True)
