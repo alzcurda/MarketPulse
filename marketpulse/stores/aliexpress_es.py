@@ -207,7 +207,7 @@ class AliExpressEsProvider(BaseStoreProvider):
         return results
 
     def search(self, criteria: SearchCriteria) -> List[ProductResult]:
-        queries = criteria.target_search_queries[:4] if criteria.target_search_queries else [criteria.clean_query]
+        queries = criteria.target_search_queries[:6] if criteria.target_search_queries else [criteria.clean_query]
         results: List[ProductResult] = []
         seen_items = set()
 
@@ -250,8 +250,9 @@ class AliExpressEsProvider(BaseStoreProvider):
                 dom_results = self._extract_from_dom(html, seen_items)
                 results.extend(dom_results)
 
-            # Si ya obtuvimos un volumen representativo de candidatos para este término, no saturar
-            if len(results) >= 40:
+            # Si ya obtuvimos un volumen representativo de candidatos para todos los modelos, no saturar
+            limit = 80 if criteria.target_models and len(criteria.target_models) > 1 else 40
+            if len(results) >= limit:
                 break
 
         return results

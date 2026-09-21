@@ -189,8 +189,8 @@
             <div>
               <div class="flex items-center space-x-2">
                 <span class="font-bold text-lg text-white" x-text="analysisData.product_type_label || 'Configuración del Producto'"></span>
-                <span x-show="analysisData.target_brand" class="text-xs font-semibold px-2 py-0.5 rounded bg-blue-500/20 text-blue-300 border border-blue-500/30" x-text="'Marca: ' + analysisData.target_brand"></span>
-                <span x-show="analysisData.target_model" class="text-xs font-semibold px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30" x-text="'Modelo: ' + analysisData.target_model"></span>
+                <span x-show="analysisData.target_models && analysisData.target_models.length > 1" class="text-xs font-semibold px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30" x-text="'Modelos (' + analysisData.target_models.length + '): ' + analysisData.target_models.join(', ')"></span>
+                <span x-show="analysisData.target_model && (!analysisData.target_models || analysisData.target_models.length <= 1)" class="text-xs font-semibold px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30" x-text="'Modelo: ' + analysisData.target_model"></span>
               </div>
               <p class="text-xs text-slate-400 mt-0.5">
                 Modifica cualquier parámetro con un clic y actualiza la búsqueda en vivo sin reiniciar.

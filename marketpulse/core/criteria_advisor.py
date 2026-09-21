@@ -257,7 +257,7 @@ class CriteriaAdvisor:
 
     @staticmethod
     def generate_model_variants(raw_model: str) -> List[str]:
-        """Genera variantes normalizadas de un código de modelo (ej: EQi12, EQi-12, EQI 12)."""
+        """Genera variantes normalizadas de un código de modelo (ej: EQi12, EQi-12, EQI 12, Mini S12 Pro)."""
         norm = raw_model.lower().strip()
         clean = re.sub(r"[^a-z0-9]", "", norm)
         variants = {norm, clean}
@@ -268,9 +268,28 @@ class CriteriaAdvisor:
             variants.add(f"{m.group(1)}-{m.group(2)}")
             variants.add(f"{m.group(1)} {m.group(2)}")
 
+        # Patrón letra + número + letras (ej. s12pro -> s 12 pro, s-12-pro, s12 pro)
+        m_full = re.match(r"^([a-z]+?)(\d+)([a-z]+)$", clean)
+        if m_full:
+            prefix, num, suffix = m_full.groups()
+            variants.add(f"{prefix}{num} {suffix}")
+            variants.add(f"{prefix} {num} {suffix}")
+            variants.add(f"{prefix}-{num}-{suffix}")
+            variants.add(f"{prefix}{num}-{suffix}")
+
         if " " in norm:
             variants.add(norm.replace(" ", "-"))
             variants.add(norm.replace(" ", ""))
+            # Separar letras de números en cada subpalabra (ej: mini s12 pro -> mini s 12 pro)
+            expanded_words = []
+            for w in norm.split():
+                mw = re.match(r"^([a-z]+)(\d+)$", w)
+                if mw:
+                    expanded_words.append(f"{mw.group(1)} {mw.group(2)}")
+                else:
+                    expanded_words.append(w)
+            variants.add(" ".join(expanded_words))
+
         if "-" in norm:
             variants.add(norm.replace("-", " "))
             variants.add(norm.replace("-", ""))
@@ -374,33 +393,49 @@ class CriteriaAdvisor:
             return None, [], []
 
         primary_model = target_models[0]
+        safe_variants = self.build_model_variants(target_models, brand)
+        return primary_model, target_models, safe_variants
+
+    def build_model_variants(self, target_models: List[str], target_brand: Optional[str] = None) -> List[str]:
+        """Genera y enriquece variantes normalizadas para una lista de modelos y su marca."""
         all_variants: set = set()
+        modifiers = {"pro", "plus", "max", "ultra", "air"}
+        brand_norm = target_brand.lower().strip() if target_brand else None
 
         for tm in target_models:
-            variants = self.generate_model_variants(tm)
-            all_variants.update(variants)
+            all_variants.update(self.generate_model_variants(tm))
 
             parts = tm.split()
-            if len(parts) >= 2:
-                prefix = parts[0].lower()
-                suffix = parts[-1].lower() # Ej: g4
-                # NUNCA añadir suffix solo si es <= 3 caracteres para evitar falsos positivos
-                if len(suffix) >= 4:
-                    all_variants.add(suffix)
-                    all_variants.add(f"{suffix} pro")
-                    all_variants.add(f"{suffix}s")
-                all_variants.add(f"{prefix} {suffix}")
-                all_variants.add(f"{prefix}-{suffix}")
-                all_variants.add(f"{prefix}{suffix}")
+            # Si empieza con 'mini' (ej: Mini S12 Pro -> S12 Pro)
+            if len(parts) >= 2 and parts[0].lower() == "mini":
+                without_mini = " ".join(parts[1:])
+                all_variants.update(self.generate_model_variants(without_mini))
                 if brand_norm:
-                    all_variants.add(f"{brand_norm} {suffix}")
-                    all_variants.add(f"{brand_norm}-{suffix}")
-                    all_variants.add(f"{brand_norm}{suffix}")
-                    all_variants.add(f"{brand_norm} {suffix} pro")
-                    all_variants.add(f"{brand_norm} {tm.lower()}")
-                    all_variants.add(f"{brand_norm} {prefix}")
+                    all_variants.add(f"{brand_norm} {without_mini.lower()}")
+                    all_variants.add(f"{brand_norm}-{without_mini.lower()}")
 
-        return primary_model, target_models, sorted(list(all_variants))
+            # Si termina con modificador (ej: S12 Pro)
+            if len(parts) >= 2 and parts[-1].lower() in modifiers:
+                base_model = " ".join(parts[:-1])
+                mod = parts[-1].lower()
+                if base_model.lower().startswith("mini "):
+                    core = base_model[5:]
+                    all_variants.update(self.generate_model_variants(f"{core} {mod}"))
+                    if brand_norm:
+                        all_variants.add(f"{brand_norm} {core.lower()} {mod}")
+                        all_variants.add(f"{brand_norm} {core.lower()}")
+
+            if brand_norm:
+                all_variants.add(f"{brand_norm} {tm.lower()}")
+                all_variants.add(f"{brand_norm}-{tm.lower()}")
+
+        # Eliminar posibles tokens genéricos aislados que causarían falsos positivos
+        dangerous_tokens = {"mini", "pro", "plus", "max", "ultra", "air"}
+        if brand_norm:
+            dangerous_tokens.update({f"{brand_norm} mini", f"{brand_norm} pro", f"{brand_norm} plus"})
+        safe_variants = {v for v in all_variants if v not in dangerous_tokens and len(v) >= 3}
+
+        return sorted(list(safe_variants))
 
     def extract_target_model(self, text: str) -> Tuple[Optional[str], List[str]]:
         """
@@ -500,7 +535,8 @@ class CriteriaAdvisor:
             "bueno", "bonito", "barato", "calidad", "precio", "euros", "euro", "presupuesto",
             "un", "una", "unos", "unas", "el", "la", "los", "las", "de", "en", "por", "que",
             "tenga", "tengan", "minimo", "como", "al", "menos", "desde", "hasta", "envio",
-            "nacional", "espana", "union", "europea", "ue", "cueste", "cuesta"
+            "nacional", "espana", "union", "europea", "ue", "cueste", "cuesta",
+            "modelo", "modelos", "version", "versiones", "serie", "series"
         }
 
         words = text_clean.split()
@@ -543,12 +579,25 @@ class CriteriaAdvisor:
 
         queries = []
 
-        # 1. Consulta limpia completa como prioridad máxima
-        if clean_query and clean_query not in queries:
-            queries.append(clean_query)
+        models_to_query = target_models or ([target_model] if target_model else [])
+
+        # Si hay múltiples modelos específicos (ej: Mini S12 Pro, EQ12, SEi12, EQi12),
+        # priorizar consultas individuales por cada modelo para que las tiendas encuentren todos los modelos
+        if len(models_to_query) > 1:
+            for tm in models_to_query:
+                model_clean = tm.lower()
+                q_brand_model = f"{brand_clean} {model_clean}".strip() if brand_clean and brand_clean not in model_clean else model_clean
+                if q_brand_model not in queries:
+                    queries.append(q_brand_model)
+                q_brand_model_pc = f"{q_brand_model} {base_product}".strip()
+                if q_brand_model_pc not in queries:
+                    queries.append(q_brand_model_pc)
+        else:
+            # 1. Consulta limpia completa como prioridad para búsquedas normales de un solo modelo o genéricas
+            if clean_query and clean_query not in queries:
+                queries.append(clean_query)
 
         # 2. Consultas combinadas con modelo y marca
-        models_to_query = target_models or ([target_model] if target_model else [])
         for tm in models_to_query[:5]:
             model_clean = tm.lower()
             if brand_clean and brand_clean not in model_clean:

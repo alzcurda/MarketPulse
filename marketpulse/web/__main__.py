@@ -51,7 +51,16 @@ def main():
     if not os.getenv("NO_BROWSER"):
         threading.Thread(target=open_browser_delayed, args=(f"http://localhost:{port}",), daemon=True).start()
 
-    uvicorn.run("marketpulse.web.app:app", host=host, port=port, log_level="info")
+    # Auto-recarga automática (hot-reload): se reinicia solo al modificar código
+    reload_enabled = os.getenv("RELOAD", "true").lower() in ("true", "1", "yes")
+    uvicorn.run(
+        "marketpulse.web.app:app",
+        host=host,
+        port=port,
+        reload=reload_enabled,
+        reload_dirs=["marketpulse"] if reload_enabled else None,
+        log_level="info",
+    )
 
 
 if __name__ == "__main__":

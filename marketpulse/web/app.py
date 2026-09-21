@@ -200,11 +200,10 @@ def search_products(req: SearchRequest):
             category_enum = pc
             break
 
-    target_variants = advisor.generate_model_variants(req.target_model) if req.target_model else []
-    for tm in req.target_models:
-        for v in advisor.generate_model_variants(tm):
-            if v not in target_variants:
-                target_variants.append(v)
+    models_list = list(req.target_models)
+    if req.target_model and req.target_model not in models_list:
+        models_list.append(req.target_model)
+    target_variants = advisor.build_model_variants(models_list, req.target_brand)
 
     target_queries = advisor.build_targeted_queries(
         req.clean_query,
@@ -250,17 +249,12 @@ def search_products(req: SearchRequest):
         stores_to_search = ["aliexpress_es", "amazon_es", "pccomponentes"]
 
     raw_candidates: List[ProductResult] = []
-    with ThreadPoolExecutor(max_workers=min(len(stores_to_search), 4)) as executor:
-        future_to_store = {
-            executor.submit(_execute_store_search, store_id, criteria): store_id
-            for store_id in stores_to_search
-        }
-        for future in as_completed(future_to_store):
-            try:
-                results = future.result()
-                raw_candidates.extend(results)
-            except Exception as e:
-                logger.error(f"Fallo en hilo de búsqueda: {e}")
+    for store_id in stores_to_search:
+        try:
+            results = _execute_store_search(store_id, criteria)
+            raw_candidates.extend(results)
+        except Exception as e:
+            logger.error(f"Error al consultar tienda '{store_id}': {e}")
 
     # Filtrar y ordenar con Aggregator
     ranked_products = aggregator.filter_and_rank(raw_candidates, criteria)
