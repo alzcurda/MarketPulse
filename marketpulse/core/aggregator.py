@@ -450,9 +450,22 @@ class Aggregator:
             if not query_has_accessory:
                 matched_acc = next((pat for pat in self.ACCESSORY_PATTERNS if re.search(pat, title_lower)), None)
                 if matched_acc:
-                    clean_pat = re.sub(r"[\\b^$]", "", matched_acc)
-                    self._record_discard(prod, DiscardReason.ACCESSORY, f"Accesorio o periférico ({clean_pat})")
-                    continue
+                    # Comprobar si es un equipo completo que simplemente menciona accesorios incluidos (ej: "Mini PC con i5... fuente de alimentación")
+                    is_full_system = (
+                        prod.price >= (criteria.min_system_price or 35.0)
+                        and any(w in title_lower for w in ["mini pc", "ordenador", "desktop", "computadora", "portátil", "laptop", "barebone"])
+                        and any(w in title_lower for w in ["gb", "ram", "ddr", "ssd", "nvme", "intel", "amd", "ryzen", "core", "n100", "n95", "n150"])
+                    )
+                    # Si parece equipo completo, solo descartar si el accesorio es el núcleo del artículo
+                    # (ej: el título empieza por el accesorio o contiene "para/for/repuesto/compatible con")
+                    accessory_is_primary = bool(
+                        re.search(rf"^(?:kit\s+de\s+|mini\s+)?{matched_acc}", title_lower.strip())
+                        or re.search(r"\b(?:para|for|pour|repuesto|recambio|reemplazo|compatible\s+con)\b", title_lower)
+                    )
+                    if not is_full_system or accessory_is_primary:
+                        clean_pat = re.sub(r"[\\b^$]", "", matched_acc)
+                        self._record_discard(prod, DiscardReason.ACCESSORY, f"Accesorio o periférico ({clean_pat})")
+                        continue
 
             # 4b. Verificador adicional de autenticidad del tipo de artículo (equipos completos vs ventiladores/raquetas/repuestos)
             is_valid_type, discard_reason, discard_detail = self.verify_product_type_integrity(prod, criteria)

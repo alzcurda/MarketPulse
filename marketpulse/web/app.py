@@ -70,6 +70,13 @@ class AnalyzeRequest(BaseModel):
     query: str = Field(..., description="Consulta en lenguaje natural o transcripción de voz")
 
 
+class CorrectRequest(BaseModel):
+    current_query: str = Field(..., description="Consulta previa o título original")
+    correction: str = Field(..., description="Corrección hablada o escrita por el usuario")
+    current_brand: Optional[str] = None
+    current_models: List[str] = []
+
+
 class SearchRequest(BaseModel):
     raw_query: str
     clean_query: str
@@ -109,17 +116,8 @@ def get_system_status():
     }
 
 
-@app.post("/api/analyze")
-def analyze_prompt(req: AnalyzeRequest):
-    """Analiza la consulta del usuario con Gemini 3.8 / LLM o reglas locales."""
-    user_query = req.query.strip()
-    if not user_query:
-        raise HTTPException(status_code=400, detail="La consulta no puede estar vacía")
-
-    advisor = CriteriaAdvisor()
+def _format_analysis_response(criteria: SearchCriteria) -> Dict[str, Any]:
     router = StoreRouter()
-
-    criteria = advisor.analyze_user_prompt(user_query)
     recommendations = router.recommend_stores(criteria)
 
     # Preparar tiendas recomendadas
@@ -170,6 +168,35 @@ def analyze_prompt(req: AnalyzeRequest):
             {"id": sid, **meta} for sid, meta in STORE_METADATA.items()
         ],
     }
+
+
+@app.post("/api/analyze")
+def analyze_prompt(req: AnalyzeRequest):
+    """Analiza la consulta del usuario con Gemini 3.8 / LLM o reglas locales."""
+    user_query = req.query.strip()
+    if not user_query:
+        raise HTTPException(status_code=400, detail="La consulta no puede estar vacía")
+
+    advisor = CriteriaAdvisor()
+    criteria = advisor.analyze_user_prompt(user_query)
+    return _format_analysis_response(criteria)
+
+
+@app.post("/api/correct")
+def correct_prompt(req: CorrectRequest):
+    """Ajusta y corrige los criterios interpretados en base a la corrección del usuario (voz o texto)."""
+    correction_text = req.correction.strip()
+    if not correction_text:
+        raise HTTPException(status_code=400, detail="La instrucción de corrección no puede estar vacía")
+
+    advisor = CriteriaAdvisor()
+    criteria = advisor.refine_with_feedback(
+        current_query=req.current_query,
+        correction=correction_text,
+        current_brand=req.current_brand,
+        current_models=req.current_models,
+    )
+    return _format_analysis_response(criteria)
 
 
 def _execute_store_search(store_id: str, criteria: SearchCriteria) -> List[ProductResult]:

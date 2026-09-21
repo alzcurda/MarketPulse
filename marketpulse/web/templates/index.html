@@ -182,18 +182,61 @@
         
         <!-- Cabecera del Panel: Categoría y Marca detectada -->
         <div class="flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-slate-800">
-          <div class="flex items-center space-x-3">
-            <div class="p-2 rounded-lg bg-cyan-500/10 border border-cyan-500/30 text-cyan-400">
+          <div class="flex items-start space-x-3 flex-1">
+            <div class="p-2 rounded-lg bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 shrink-0 mt-0.5">
               <i data-lucide="sliders" class="w-5 h-5"></i>
             </div>
-            <div>
-              <div class="flex items-center space-x-2">
+            <div class="flex-1 min-w-0">
+              <div class="flex flex-wrap items-center gap-2">
                 <span class="font-bold text-lg text-white" x-text="analysisData.product_type_label || 'Configuración del Producto'"></span>
-                <span x-show="analysisData.target_models && analysisData.target_models.length > 1" class="text-xs font-semibold px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30" x-text="'Modelos (' + analysisData.target_models.length + '): ' + analysisData.target_models.join(', ')"></span>
-                <span x-show="analysisData.target_model && (!analysisData.target_models || analysisData.target_models.length <= 1)" class="text-xs font-semibold px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30" x-text="'Modelo: ' + analysisData.target_model"></span>
+
+                <!-- Badge de Marca -->
+                <span x-show="analysisData.target_brand" class="inline-flex items-center text-xs font-semibold px-2.5 py-0.5 rounded bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                  <span>Marca: <strong x-text="analysisData.target_brand"></strong></span>
+                </span>
+
+                <!-- Badges de Modelos interactivos con botón [✕] para borrar individualmente -->
+                <template x-for="(m, idx) in (analysisData.target_models || (analysisData.target_model ? [analysisData.target_model] : []))" :key="idx">
+                  <span class="inline-flex items-center text-xs font-semibold px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                    <span x-text="'Modelo: ' + m"></span>
+                    <button type="button" 
+                            @click="removeTargetModel(m)" 
+                            class="ml-1.5 text-indigo-400 hover:text-red-400 font-bold focus:outline-none" 
+                            title="Eliminar este modelo">✕</button>
+                  </span>
+                </template>
+
+                <!-- Botón para alternar edición manual directa -->
+                <button type="button" 
+                        @click="isEditingCriteria = !isEditingCriteria" 
+                        class="text-xs px-2.5 py-0.5 rounded border border-slate-700 hover:border-slate-500 text-slate-300 hover:text-white transition-colors flex items-center space-x-1">
+                  <span x-text="isEditingCriteria ? '✕ Ocultar edición' : '✏️ Editar a mano'"></span>
+                </button>
               </div>
-              <p class="text-xs text-slate-400 mt-0.5">
-                Modifica cualquier parámetro con un clic y actualiza la búsqueda en vivo sin reiniciar.
+
+              <!-- Panel de Edición Manual Directa -->
+              <div x-show="isEditingCriteria" class="mt-3 p-3 rounded-xl bg-slate-950/90 border border-slate-700 space-y-2.5">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div>
+                    <label class="text-[11px] font-semibold text-slate-400 uppercase">Marca</label>
+                    <input type="text" 
+                           x-model="analysisData.target_brand" 
+                           placeholder="Ej: Trigkey, Beelink, Apple..."
+                           class="w-full mt-1 bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white focus:border-cyan-500 focus:outline-none">
+                  </div>
+                  <div>
+                    <label class="text-[11px] font-semibold text-slate-400 uppercase">Modelos (separados por coma)</label>
+                    <input type="text" 
+                           :value="(analysisData.target_models || []).join(', ')" 
+                           @change="updateModelsFromInput($event.target.value)" 
+                           placeholder="Ej: Green G4, S12 Pro..."
+                           class="w-full mt-1 bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white focus:border-cyan-500 focus:outline-none">
+                  </div>
+                </div>
+              </div>
+
+              <p class="text-xs text-slate-400 mt-1">
+                Modifica cualquier parámetro con un clic o háblale al asistente para corregir en vivo.
               </p>
             </div>
           </div>
@@ -201,7 +244,7 @@
           <!-- Botón Principal: Actualizar Búsqueda -->
           <button @click="executeSearch()"
                   :disabled="isSearching"
-                  class="px-6 py-2.5 rounded-xl font-bold text-sm bg-gradient-to-r from-emerald-400 to-teal-500 hover:from-emerald-300 hover:to-teal-400 text-black shadow-lg shadow-emerald-500/20 transition-all flex items-center space-x-2 disabled:opacity-50">
+                  class="px-6 py-2.5 rounded-xl font-bold text-sm bg-gradient-to-r from-emerald-400 to-teal-500 hover:from-emerald-300 hover:to-teal-400 text-black shadow-lg shadow-emerald-500/20 transition-all flex items-center space-x-2 disabled:opacity-50 shrink-0">
             <span x-show="!isSearching">🔍 Buscar en Tiendas</span>
             <span x-show="isSearching" class="flex items-center space-x-2">
               <svg class="animate-spin h-4 w-4 text-black" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -209,6 +252,32 @@
                 <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
               </svg>
               <span>Rastreando tiendas...</span>
+            </span>
+          </button>
+        </div>
+
+        <!-- Barra Conversacional de Diálogo con el Asistente ("Hablar o escribir corrección con IA") -->
+        <div class="p-2.5 rounded-xl bg-slate-950/70 border border-indigo-500/30 flex items-center space-x-2">
+          <button type="button"
+                  @click="toggleCorrectionListening()"
+                  :class="isListeningCorrection ? 'bg-red-500 text-white animate-pulse' : 'bg-slate-900 text-slate-400 hover:text-cyan-400 hover:bg-slate-800'"
+                  class="p-2 rounded-lg border border-slate-800 transition-all flex items-center justify-center shrink-0"
+                  title="Hablar al asistente para dictar corrección">
+            <i data-lucide="mic" class="w-4 h-4"></i>
+          </button>
+          <input type="text"
+                 x-model="correctionInput"
+                 @keydown.enter.prevent="submitCorrection()"
+                 placeholder="¿La categorización no es exacta? Habla o escribe para corregir (ej: 'la marca es Trigkey y el modelo solo Green G4')..."
+                 class="flex-1 bg-transparent border-0 text-xs md:text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-0">
+          <button type="button"
+                  @click="submitCorrection()"
+                  :disabled="!correctionInput.trim() || isCorrecting"
+                  class="px-3.5 py-1.5 rounded-lg font-semibold text-xs bg-indigo-600 hover:bg-indigo-500 text-white transition-all disabled:opacity-40 flex items-center space-x-1.5 shrink-0 shadow-sm shadow-indigo-600/30">
+            <span x-show="!isCorrecting">✨ Corregir con IA</span>
+            <span x-show="isCorrecting" class="flex items-center space-x-1">
+              <svg class="animate-spin h-3.5 w-3.5" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
+              <span>Ajustando...</span>
             </span>
           </button>
         </div>
@@ -278,8 +347,46 @@
 
         </div>
 
+        <!-- Barra de Acción Inferior: Confirmar Criterios y Lanzar Búsqueda -->
+        <div class="pt-4 border-t border-slate-800 flex flex-wrap items-center justify-between gap-4">
+          <div class="flex items-center space-x-2 text-xs text-slate-400">
+            <i data-lucide="check-circle" class="w-4 h-4 text-emerald-400"></i>
+            <span>Criterios preparados. Revisa los filtros y pulsa para rastrear las tiendas.</span>
+          </div>
+          <button @click="executeSearch()"
+                  :disabled="isSearching"
+                  class="px-7 py-3 rounded-xl font-bold text-sm bg-gradient-to-r from-emerald-400 to-teal-500 hover:from-emerald-300 hover:to-teal-400 text-black shadow-lg shadow-emerald-500/25 hover:shadow-emerald-500/40 transition-all flex items-center space-x-2 disabled:opacity-50">
+            <span x-show="!isSearching">🔍 Buscar en Tiendas</span>
+            <span x-show="isSearching" class="flex items-center space-x-2">
+              <svg class="animate-spin h-4 w-4 text-black" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+              <span>Rastreando tiendas...</span>
+            </span>
+          </button>
+        </div>
+
       </div>
     </section>
+
+    <!-- Estado de Espera: Criterios listos para buscar -->
+    <div x-show="analysisData && !searchResults && !isSearching" x-cloak class="max-w-xl mx-auto p-6 rounded-2xl bg-slate-900/60 border border-slate-800 text-center space-y-3 shadow-lg">
+      <div class="inline-flex items-center justify-center p-3 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400">
+        <i data-lucide="sliders" class="w-6 h-6"></i>
+      </div>
+      <h3 class="text-base font-bold text-white">Criterios configurados</h3>
+      <p class="text-xs text-slate-400">
+        Revisa los filtros arriba (procesador, RAM, tiendas, etc.) y haz clic en 
+        <strong class="text-emerald-400 font-semibold">🔍 Buscar en Tiendas</strong> cuando quieras lanzar el rastreo.
+      </p>
+      <div>
+        <button @click="executeSearch()"
+                class="mt-2 px-6 py-2.5 rounded-xl font-bold text-xs bg-emerald-500 hover:bg-emerald-400 text-black shadow-md shadow-emerald-500/20 transition-all inline-flex items-center space-x-2">
+          <span>🔍 Buscar en Tiendas Ahora</span>
+        </button>
+      </div>
+    </div>
 
     <!-- 4. Indicador de Progreso durante Búsqueda -->
     <div x-show="isSearching" x-cloak class="max-w-md mx-auto p-6 rounded-2xl bg-slate-900 border border-slate-800 text-center space-y-3">
@@ -462,6 +569,12 @@
         recognition: null,
 
         analysisData: null,
+        isEditingCriteria: false,
+        correctionInput: '',
+        isCorrecting: false,
+        isListeningCorrection: false,
+        correctionRecognition: null,
+
         selectedRefinements: {},
         selectedStores: ['aliexpress_es', 'amazon_es', 'pccomponentes'],
         allAvailableStores: [],
@@ -474,6 +587,7 @@
         initApp() {
           this.fetchSystemStatus();
           this.initVoiceRecognition();
+          this.initCorrectionVoiceRecognition();
           this.$nextTick(() => { lucide.createIcons(); });
         },
 
@@ -616,6 +730,8 @@
           if (!q) return;
 
           this.isAnalyzing = true;
+          this.searchResults = null;
+          this.lastDiscards = [];
           try {
             const res = await fetch('/api/analyze', {
               method: 'POST',
@@ -644,8 +760,7 @@
 
             this.$nextTick(() => { lucide.createIcons(); });
 
-            // Ejecutar la primera búsqueda automáticamente con los valores recomendados
-            this.executeSearch();
+            // Ya no lanzamos la búsqueda pesada automáticamente. Esperamos a que el usuario valide y pulse 'Buscar en Tiendas'.
 
           } catch (e) {
             alert('Error en análisis: ' + e.message);
@@ -656,6 +771,111 @@
 
         selectRefinement(key, option) {
           this.selectedRefinements[key] = option;
+        },
+
+        removeTargetModel(modelName) {
+          if (!this.analysisData) return;
+          let list = this.analysisData.target_models || [];
+          if (list.length === 0 && this.analysisData.target_model) {
+            list = [this.analysisData.target_model];
+          }
+          this.analysisData.target_models = list.filter(m => m !== modelName);
+          this.analysisData.target_model = this.analysisData.target_models[0] || null;
+        },
+
+        updateModelsFromInput(val) {
+          if (!this.analysisData) return;
+          const list = val.split(',').map(s => s.trim()).filter(Boolean);
+          this.analysisData.target_models = list;
+          this.analysisData.target_model = list[0] || null;
+        },
+
+        initCorrectionVoiceRecognition() {
+          const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+          if (!SpeechRecognition) return;
+          try {
+            this.correctionRecognition = new SpeechRecognition();
+            this.correctionRecognition.lang = 'es-ES';
+            this.correctionRecognition.continuous = false;
+            this.correctionRecognition.interimResults = false;
+
+            this.correctionRecognition.onstart = () => {
+              this.isListeningCorrection = true;
+            };
+            this.correctionRecognition.onresult = (event) => {
+              if (event.results && event.results[0]) {
+                this.correctionInput = event.results[0][0].transcript;
+              }
+            };
+            this.correctionRecognition.onerror = (e) => {
+              this.isListeningCorrection = false;
+            };
+            this.correctionRecognition.onend = () => {
+              this.isListeningCorrection = false;
+              if (this.correctionInput.trim()) {
+                this.submitCorrection();
+              }
+            };
+          } catch (e) {
+            console.warn('Correction speech recognition not available:', e);
+          }
+        },
+
+        toggleCorrectionListening() {
+          if (!this.correctionRecognition) {
+            this.initCorrectionVoiceRecognition();
+          }
+          if (!this.correctionRecognition) {
+            alert('El reconocimiento de voz no está soportado en este navegador.');
+            return;
+          }
+          if (this.isListeningCorrection) {
+            this.correctionRecognition.stop();
+          } else {
+            this.correctionRecognition.start();
+          }
+        },
+
+        async submitCorrection() {
+          const text = this.correctionInput.trim();
+          if (!text || !this.analysisData) return;
+          this.isCorrecting = true;
+          try {
+            const payload = {
+              current_query: this.analysisData.raw_query || this.searchQuery,
+              correction: text,
+              current_brand: this.analysisData.target_brand,
+              current_models: this.analysisData.target_models || []
+            };
+            const res = await fetch('/api/correct', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload)
+            });
+            if (!res.ok) throw new Error('No se pudo procesar la corrección');
+            const data = await res.json();
+            this.analysisData = data;
+            this.correctionInput = '';
+
+            // Reinicializar afinamientos por defecto si cambiaron
+            if (data.refinement_aspects) {
+              data.refinement_aspects.forEach(asp => {
+                if (asp.recommended_option && !this.selectedRefinements[asp.key]) {
+                  this.selectedRefinements[asp.key] = asp.recommended_option;
+                }
+              });
+            }
+
+            this.$nextTick(() => { lucide.createIcons(); });
+
+            // Ya no autoejecutamos búsqueda: dejamos que el usuario vea la corrección y pulse Buscar en Tiendas
+            this.searchResults = null;
+
+          } catch (e) {
+            alert('Error al ajustar con el asistente: ' + e.message);
+          } finally {
+            this.isCorrecting = false;
+          }
         },
 
         toggleStore(storeId) {

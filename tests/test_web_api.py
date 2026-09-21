@@ -75,6 +75,19 @@ class TestWebAPI(unittest.TestCase):
         self.assertEqual(data["products"][0]["store_name"], "AliExpress")
         self.assertEqual(data["products"][0]["price"], 219.0)
 
+    def test_correct_endpoint(self):
+        payload = {
+            "current_query": "Mini pc TRIGKEY Green G4 Intel",
+            "correction": "la marca es Trigkey y el modelo es solo Green G4",
+            "current_brand": "Trigkey",
+            "current_models": ["Green G4", "Trigkey G4"]
+        }
+        resp = self.client.post("/api/correct", json=payload)
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data["target_brand"], "Trigkey")
+        self.assertEqual(data["target_models"], ["Green G4"])
+
 
 if __name__ == "__main__":
     unittest.main()

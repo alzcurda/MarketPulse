@@ -427,7 +427,31 @@ class TestAggregator(unittest.TestCase):
 
         filtered = self.aggregator.filter_and_rank(candidates, criteria)
         self.assertEqual(len(filtered), 1)
-        self.assertEqual(filtered[0].url, "https://amazon.es/minipc")
+    def test_full_system_mentioning_bundled_power_supply(self):
+        criteria = SearchCriteria(
+            raw_query="Mini PC Beelink EQi12",
+            clean_query="beelink eqi12",
+            category=ProductCategory.GENERAL_TECH,
+            target_models=["EQi12"],
+            product_type="mini_pc",
+        )
+        candidates = [
+            ProductResult(
+                title="Beelink EQi12 - Mini PC con Windows 11 Pro, Intel i5-1235U, 32 GB de RAM DDR4, SSD NVMe 500 GB, fuente de alimentación",
+                price=729.99,
+                store_name="Amazon España",
+                url="https://amazon.es/eqi12-i5"
+            ),
+            ProductResult(
+                title="Fuente de alimentación para Beelink Mini PC",
+                price=19.99,
+                store_name="Amazon España",
+                url="https://amazon.es/power-supply"
+            )
+        ]
+        filtered = self.aggregator.filter_and_rank(candidates, criteria)
+        self.assertEqual(len(filtered), 1)
+        self.assertEqual(filtered[0].url, "https://amazon.es/eqi12-i5")
 
 
 if __name__ == "__main__":

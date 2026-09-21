@@ -379,6 +379,14 @@ class CriteriaAdvisor:
                     continue
                 if re.match(r"^(?:n\d{2,3}|16gb|512gb|1tb)$", norm_check):
                     continue
+                # Si el token ya está cubierto dentro de un modelo existente (ej: 'G4' dentro de 'Green G4'), no duplicar
+                if any(
+                    norm_check == tm.lower().replace(" ", "").replace("-", "")
+                    or norm_check in [w.lower().replace("-", "") for w in tm.split()]
+                    for tm in target_models
+                ):
+                    continue
+
                 # Si el código es muy corto (<= 2 caracteres, ej: G4), solo se admite ligado a la marca
                 if len(norm_check) < 3:
                     if brand:
@@ -424,6 +432,14 @@ class CriteriaAdvisor:
                     if brand_norm:
                         all_variants.add(f"{brand_norm} {core.lower()} {mod}")
                         all_variants.add(f"{brand_norm} {core.lower()}")
+
+            # Si tiene sufijo de submodelo no modificador (ej: NucBox G3 -> gmktec g3, Green G4 -> trigkey g4)
+            if len(parts) >= 2 and parts[-1].lower() not in modifiers:
+                suffix = parts[-1].lower()
+                all_variants.update(self.generate_model_variants(suffix))
+                if brand_norm:
+                    all_variants.add(f"{brand_norm} {suffix}")
+                    all_variants.add(f"{brand_norm}-{suffix}")
 
             if brand_norm:
                 all_variants.add(f"{brand_norm} {tm.lower()}")
@@ -640,6 +656,52 @@ class CriteriaAdvisor:
 
         return queries
 
+    def _create_cpu_refinement(self, target_models: List[str], prompt: str) -> RefinementAspect:
+        """Genera opciones de CPU contextualizadas y coherentes con los modelos o marcas solicitados."""
+        prompt_lower = self.strip_accents(prompt.lower())
+        models_text = self.strip_accents(" ".join(target_models).lower())
+
+        intel_indicators = ["s12", "eq12", "eqi", "sei", "n100", "n95", "n150", "intel", "alder lake", "core i3", "core i5", "core i7"]
+        amd_indicators = ["ser", "eqr", "ryzen", "amd"]
+
+        has_intel = any(ind in models_text or ind in prompt_lower for ind in intel_indicators)
+        has_amd = any(ind in models_text or ind in prompt_lower for ind in amd_indicators)
+
+        if has_intel and not has_amd:
+            return RefinementAspect(
+                key="cpu",
+                question="Preferencia de procesador Intel",
+                options=[
+                    "Intel N100 / N150 (Bajo consumo / Oficina)",
+                    "Intel Core i3 / Core i5 / Core i7 (Rendimiento)",
+                    "Cualquiera / Sin preferencia",
+                ],
+                recommended_option="Cualquiera / Sin preferencia",
+            )
+        elif has_amd and not has_intel:
+            return RefinementAspect(
+                key="cpu",
+                question="Preferencia de procesador AMD Ryzen",
+                options=[
+                    "AMD Ryzen 5 (Gama Media)",
+                    "AMD Ryzen 7 / Ryzen 9 (Gama Alta)",
+                    "Cualquiera / Sin preferencia",
+                ],
+                recommended_option="Cualquiera / Sin preferencia",
+            )
+        else:
+            return RefinementAspect(
+                key="cpu",
+                question="Preferencia de procesador / arquitectura",
+                options=[
+                    "AMD Ryzen (Ryzen 5 / Ryzen 7)",
+                    "Intel (Alder Lake N100 / Core i3 / Core i5)",
+                    "Gama Alta (Ryzen 7 / Core i7 o superior)",
+                    "Cualquiera / Sin preferencia",
+                ],
+                recommended_option="Cualquiera / Sin preferencia",
+            )
+
     def _build_criteria_from_llm(self, prompt: str, data: Dict[str, Any]) -> SearchCriteria:
         """Construye un SearchCriteria a partir de la interpretación semántica universal del LLM."""
         category_raw = str(data.get("category", "")).lower()
@@ -714,17 +776,7 @@ class CriteriaAdvisor:
                 insert_idx = 1 if refinement_aspects and refinement_aspects[0].key == "barebone" else 0
                 refinement_aspects.insert(
                     insert_idx,
-                    RefinementAspect(
-                        key="cpu",
-                        question="Preferencia de procesador / arquitectura",
-                        options=[
-                            "AMD Ryzen (Ryzen 5 / Ryzen 7)",
-                            "Intel (Alder Lake N100 / Core i3 / Core i5)",
-                            "Gama Alta (Ryzen 7 / Core i7 o superior)",
-                            "Cualquiera / Sin preferencia",
-                        ],
-                        recommended_option="Cualquiera / Sin preferencia",
-                    )
+                    self._create_cpu_refinement(target_models, prompt),
                 )
 
         if refinement_aspects and (not min_ram_gb or not min_storage_gb):
@@ -823,17 +875,7 @@ class CriteriaAdvisor:
                     ],
                     recommended_option="Solo equipos completos listos para usar",
                 ),
-                RefinementAspect(
-                    key="cpu",
-                    question="Preferencia de procesador / arquitectura",
-                    options=[
-                        "AMD Ryzen (Ryzen 5 / Ryzen 7)",
-                        "Intel (Alder Lake N100 / Core i3 / Core i5)",
-                        "Gama Alta (Ryzen 7 / Core i7 o superior)",
-                        "Cualquiera / Sin preferencia",
-                    ],
-                    recommended_option="Cualquiera / Sin preferencia",
-                ),
+                self._create_cpu_refinement(target_models, prompt),
                 RefinementAspect(
                     key="ram",
                     question="Memoria RAM mínima deseada",
@@ -924,7 +966,14 @@ class CriteriaAdvisor:
 
             # 3. Parámetro Procesador / CPU
             elif any(s in k_lower for s in ["cpu", "procesador", "architecture", "arquitectura"]):
-                if "amd" in text_lower or "ryzen" in text_lower:
+                norm_choice = self.strip_accents(text_lower)
+                if any(w in norm_choice for w in ["sin preferencia", "cualquiera", "indiferente"]):
+                    criteria.allowed_cpus = []
+                elif any(c in norm_choice for c in ["n100", "n150", "n95", "bajo consumo"]):
+                    criteria.allowed_cpus = ["N100", "N150", "N95"]
+                elif any(c in norm_choice for c in ["core i3", "core i5", "core i7", "rendimiento"]):
+                    criteria.allowed_cpus = ["i3", "i5", "i7", "Core"]
+                elif "amd" in text_lower or "ryzen" in text_lower:
                     criteria.allowed_cpus = ["Ryzen"]
                     if "Ryzen" not in criteria.key_specs:
                         criteria.key_specs.append("Ryzen")
@@ -972,6 +1021,75 @@ class CriteriaAdvisor:
                 target_models=criteria.target_models,
                 target_brand=criteria.target_brand,
             )
+
+        return criteria
+
+    def refine_with_feedback(
+        self,
+        current_query: str,
+        correction: str,
+        current_brand: Optional[str] = None,
+        current_models: Optional[List[str]] = None,
+    ) -> SearchCriteria:
+        """
+        Ajusta y corrige los criterios de búsqueda basándose en una aclaración o retroalimentación
+        del usuario (hablada o escrita), resolviendo correcciones como:
+        'la marca es Trigkey y el modelo es solo Green G4' o 'quita Trigkey G4'.
+        """
+        correction_clean = correction.strip()
+        combined_prompt = f"{current_query}. Corrección del usuario: {correction_clean}"
+        if current_brand:
+            combined_prompt += f" (Marca previa: {current_brand})"
+
+        # 1. Analizar con LLM o heurística sobre el contexto combinado
+        criteria = self.analyze_user_prompt(combined_prompt)
+
+        # 2. Heurística explícita para sobreescritura directa de Marca y Modelo si el usuario fue específico
+        # Detectar 'la marca es X'
+        m_brand = re.search(r"(?:la\s+marca\s+es|marca:?)\s*([A-Za-z0-9\s]+?)(?:(?:\s+y\s+el\s+modelo|\s+y\s+modelo|\.|\,|$))", correction_clean, re.I)
+        if m_brand:
+            explicit_brand = m_brand.group(1).strip().title()
+            if explicit_brand:
+                criteria.target_brand = explicit_brand
+
+        # Detectar 'el modelo es (solo) Y'
+        m_model = re.search(r"(?:el\s+modelo\s+(?:solo\s+es|es\s+solo|es)|modelo:?)\s*(?:solo\s+)?([A-Za-z0-9\s,-]+?)(?:$|\.|\,)", correction_clean, re.I)
+        if m_model:
+            explicit_model = m_model.group(1).strip()
+            if explicit_model:
+                criteria.target_model = explicit_model
+                criteria.target_models = [explicit_model]
+
+        # Detectar 'quita / elimina / borra X'
+        m_remove = re.search(r"(?:quita|elimina|borra)\s+(?:el\s+modelo\s+|a\s+)?([A-Za-z0-9\s]+?)(?:$|\.|\,)", correction_clean, re.I)
+        if m_remove:
+            to_remove = m_remove.group(1).strip().lower()
+            criteria.target_models = [m for m in criteria.target_models if m.lower() != to_remove and to_remove not in m.lower()]
+            if criteria.target_models:
+                criteria.target_model = criteria.target_models[0]
+            else:
+                criteria.target_model = None
+
+        # Detectar 'añade / agrega / incluye X'
+        m_add = re.search(r"(?:a[ñn]ade|agrega|incluye)\s+(?:el\s+modelo\s+)?([A-Za-z0-9\s]+?)(?:$|\.|\,)", correction_clean, re.I)
+        if m_add:
+            to_add = m_add.group(1).strip()
+            if to_add and to_add not in criteria.target_models:
+                criteria.target_models.append(to_add)
+                if not criteria.target_model:
+                    criteria.target_model = to_add
+
+        # 3. Regenerar variantes de modelo y consultas dirigidas
+        criteria.target_model_variants = self.build_model_variants(criteria.target_models, criteria.target_brand)
+        criteria.target_search_queries = self.build_targeted_queries(
+            criteria.clean_query,
+            criteria.allowed_cpus,
+            criteria.min_ram_gb,
+            criteria.min_storage_gb,
+            target_model=criteria.target_model,
+            target_models=criteria.target_models,
+            target_brand=criteria.target_brand,
+        )
 
         return criteria
 
