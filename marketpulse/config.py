@@ -1,5 +1,9 @@
 import os
 from typing import Dict
+from dotenv import load_dotenv
+
+# Cargar variables desde archivo .env local si existe
+load_dotenv()
 
 # Configuración general
 APP_NAME = "MarketPulse"
@@ -33,3 +37,20 @@ AVAILABLE_STORES = [
     "mediamarkt",
     "aliexpress_es",
 ]
+
+# Configuración del Motor de Inteligencia Semántica / LLM
+# Valores posibles para LLM_BACKEND: "auto", "ollama", "gemini", "openai", "none"
+LLM_BACKEND = os.getenv("LLM_BACKEND", "auto").lower()
+
+# 1. Parámetros Ollama (Instancia Local)
+OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.2")
+
+# 2. Parámetros Google Gemini (Nube / Gratis en Google AI Studio)
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+
+# 3. Parámetros OpenAI / LM Studio / Compatible
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")

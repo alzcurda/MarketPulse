@@ -41,6 +41,13 @@ class DiscardReason(str, Enum):
 
 
 
+class RefinementAspect(BaseModel):
+    key: str = Field(..., description="Identificador del parámetro (ej: ram, storage, power, grinder)")
+    question: str = Field(..., description="Pregunta concisa para el usuario")
+    options: List[str] = Field(default_factory=list, description="Opciones posibles de configuración")
+    recommended_option: Optional[str] = Field(default=None, description="Opción recomendada por defecto")
+
+
 class SearchCriteria(BaseModel):
     raw_query: str = Field(..., description="Consulta original introducida por el usuario")
     clean_query: str = Field(..., description="Término optimizado para motores de búsqueda de tiendas")
@@ -67,6 +74,8 @@ class SearchCriteria(BaseModel):
     in_stock_only: bool = Field(default=True, description="Filtrar solo productos en stock")
     ships_from_spain_only: bool = Field(default=True, description="Garantizar envío desde España o almacén europeo sin aduanas")
     sort_by: str = Field(default="relevance", description="Criterio de ordenación: relevance, price_asc, price_desc")
+    is_generic: bool = Field(default=False, description="Indica si la búsqueda representa un concepto amplio con múltiples configuraciones")
+    refinement_aspects: List[RefinementAspect] = Field(default_factory=list, description="Preguntas dinámicas de afinado sugeridas por el asesor")
 
 
 class ProductResult(BaseModel):

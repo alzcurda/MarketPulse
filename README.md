@@ -77,7 +77,75 @@ MarketPulse/
 3. **Instalar dependencias:**
    ```bash
    pip install -r requirements.txt
+   playwright install chromium
    ```
+
+---
+
+## ⚙️ Configuración del Motor Semántico (Opcional - LLM / Local / Nube)
+
+MarketPulse incluye un **Asesor Semántico Universal** capaz de entender cualquier artículo del mercado (informática, cafeteras, taladros, bicicletas, etc.) y generar preguntas inteligentes de afinado.
+
+La aplicación funciona de forma **completamente autónoma por defecto** sin necesidad de configurar nada. Si deseas activar la inteligencia artificial para cualquier tipo de producto, puedes elegir cualquiera de estas opciones:
+
+### 1. Activar la plantilla de configuración `.env`
+Copia el archivo de plantilla `.env.example` como `.env` en la raíz del proyecto:
+```bash
+# En Windows (PowerShell)
+Copy-Item .env.example .env
+
+# En Linux / macOS
+cp .env.example .env
+```
+*(El archivo `.env` está en `.gitignore` y **nunca** se subirá a repositorios públicos).*
+
+---
+
+### Opciones de Conexión Disponibles:
+
+#### 🔹 Opción A: Ollama (Instancia Local - Sin API Keys, 100% privado)
+Si tienes instalado [Ollama](https://ollama.com/) en tu ordenador:
+1. Arranca Ollama y descarga un modelo ligero (ej. Llama 3.2):
+   ```bash
+   ollama run llama3.2
+   ```
+2. En tu `.env` (o déjalo en `LLM_BACKEND=auto` ya que se auto-detecta):
+   ```env
+   LLM_BACKEND=ollama
+   OLLAMA_URL=http://localhost:11434
+   OLLAMA_MODEL=llama3.2
+   ```
+
+#### 🔹 Opción B: Google Gemini (Nube - Gratuito y ultrarrápido)
+1. Obtén tu API Key gratuita en [Google AI Studio](https://aistudio.google.com/).
+2. Configúrala en tu `.env` o como variable de entorno de tu sistema operativo:
+   ```env
+   LLM_BACKEND=gemini
+   GEMINI_API_KEY=AIzaSyTuClaveAqui...
+   GEMINI_MODEL=gemini-1.5-flash
+   ```
+
+#### 🔹 Opción C: LM Studio Local o OpenAI Compatible
+1. Si usas **LM Studio** en local con el servidor de inferencia encendido en el puerto 1234:
+   ```env
+   LLM_BACKEND=openai
+   OPENAI_BASE_URL=http://localhost:1234/v1
+   OPENAI_API_KEY=lm-studio
+   OPENAI_MODEL=local-model
+   ```
+2. Si usas la API oficial de **OpenAI**:
+   ```env
+   LLM_BACKEND=openai
+   OPENAI_API_KEY=sk-...
+   OPENAI_MODEL=gpt-4o-mini
+   ```
+
+#### 🔹 Opción D: Modo sin IA (Reglas clásicas)
+Si no deseas usar ningún modelo de lenguaje, no necesitas configurar nada o puedes fijar:
+```env
+LLM_BACKEND=none
+```
+El motor heurístico local funcionará automáticamente.
 
 ---
 

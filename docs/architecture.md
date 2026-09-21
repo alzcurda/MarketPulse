@@ -60,11 +60,18 @@ Contiene los contratos de datos unificados mediante `pydantic`:
   * `match_score`: Puntuación de afinidad con los criterios del usuario (0 - 100).
 * `StoreRecommendation`: Motivo y puntuación por la cual una tienda es adecuada para la búsqueda.
 
-### 2.2. `marketpulse.core.criteria_advisor`
-Módulo conversacional que analiza la petición en lenguaje natural:
-* Detecta la categoría (Informática, Audio, Fotografía, Electrodomésticos, etc.).
-* Extrae requerimientos implícitos y explícitos.
-* Si el usuario dice *"quiero un portátil para trabajar y programar"*, el asesor sugiere criterios como mínimo 16GB RAM, procesador de alta eficiencia y pantalla FHD/QHD, preguntando al usuario si desea fijar esos filtros.
+### 2.2. `marketpulse.core.llm_client` (Motor Semántico Multi-LLM)
+Gestor universal de inteligencia artificial sin dependencias externas pesadas (usando `httpx`):
+* **Ollama (Local / Privado):** Se conecta a `http://localhost:11434` sin claves y procesa en local de forma gratuita.
+* **Google Gemini (Nube):** Soporta Gemini 1.5 Flash mediante API Key de Google AI Studio.
+* **OpenAI / LM Studio:** Compatible con cualquier endpoint estándar `/v1/chat/completions`.
+* **Modo Auto / Fallback:** Detecta automáticamente el mejor motor disponible y recurre a reglas locales sin provocar errores.
+
+### 2.3. `marketpulse.core.criteria_advisor`
+Módulo conversacional que analiza la petición en lenguaje natural para CUALQUIER producto comercial:
+* **Entendimiento Universal:** Si hay un LLM activo, analiza automáticamente artículos de cualquier sector (herramientas, hogar, deporte, fotografía, etc.).
+* **Afinador Interactivo:** Si detecta que la búsqueda es genérica, genera de 2 a 4 preguntas con opciones múltiples (ej. potencia en vatios, tipo de batería, bares de presión, tipo de motor, RAM/SSD) para orientar al usuario.
+* **Motor de Respaldo Heurístico:** Si no hay IA configurada, opera con reglas locales para equipos informáticos y tecnología general.
 
 ### 2.3. `marketpulse.core.store_router`
 Base de conocimiento de comercio electrónico en España:

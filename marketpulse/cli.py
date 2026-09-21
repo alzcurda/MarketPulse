@@ -25,6 +25,7 @@ from marketpulse.stores.wallapop import WallapopProvider
 from marketpulse.stores.cex_es import CexProvider
 from marketpulse.stores.backmarket_es import BackMarketProvider
 from marketpulse.models import DiscardReason, ProductResult, SearchCriteria
+from marketpulse.core.llm_client import LLMClient
 
 
 console = Console()
@@ -41,10 +42,12 @@ STORE_PROVIDER_MAP: Dict[str, Type[BaseStoreProvider]] = {
 
 
 def print_banner():
+    backend, backend_label = LLMClient.get_backend_info()
     banner_text = (
         "[bold cyan]MarketPulse[/bold cyan] [white]• Asistente Inteligente de Compras y Búsqueda Multitienda[/white]\n"
-        "[dim]Especializado en el mercado español • Búsqueda limpia bajo demanda • Sin aduanas sorpresa[/dim]"
+        f"[dim]Especializado en España • Motor Semántico: [cyan]{backend_label}[/cyan] • Búsqueda limpia bajo demanda[/dim]"
     )
+    console.print(Panel(banner_text, border_style="cyan", expand=True))
 def render_discard_diagnostics(aggregator: Aggregator, total_raw: int, max_items: int = 25):
     """Muestra el panel de diagnóstico cuantitativo y la tabla detallada de candidatos descartados."""
     discards = aggregator.last_discard_records
@@ -142,6 +145,47 @@ def run_interactive_session():
         refined_prompt = Prompt.ask("Especifica el tipo de artículo o marca", default=user_prompt)
         criteria = advisor.analyze_user_prompt(refined_prompt)
         console.print(f"  [bold green]✓ Criterios reajustados:[/bold green] {criteria.product_type_label} | Marca: {criteria.target_brand or 'Cualquiera'}")
+
+    # Paso interactivo de afinado si la búsqueda es genérica
+    if criteria.is_generic and criteria.refinement_aspects:
+        console.print(f"\n[bold yellow]💡 Búsqueda base detectada:[/bold yellow] Existen múltiples configuraciones o variantes para [bold white]{criteria.product_type_label or criteria.clean_query}[/bold white].")
+        ask_refine = Confirm.ask(
+            "¿Deseas personalizar la configuración deseada para acotar la búsqueda? (o pulsa 'n' para ver todas las opciones)",
+            default=True
+        )
+        if ask_refine:
+            user_choices = {}
+            for aspect in criteria.refinement_aspects:
+                console.print(f"\n[bold cyan]• {aspect.question}:[/bold cyan]")
+                for idx, opt in enumerate(aspect.options, 1):
+                    is_rec = " [green](Recomendado)[/green]" if (aspect.recommended_option and aspect.recommended_option in opt) else ""
+                    console.print(f"   [yellow]{idx}[/yellow]) {opt}{is_rec}")
+
+                default_idx = "1"
+                if aspect.recommended_option:
+                    for i, o in enumerate(aspect.options, 1):
+                        if aspect.recommended_option in o:
+                            default_idx = str(i)
+                            break
+
+                choice_str = Prompt.ask(
+                    "Elige una opción",
+                    choices=[str(i) for i in range(1, len(aspect.options) + 1)],
+                    default=default_idx
+                )
+                selected_opt = aspect.options[int(choice_str) - 1]
+                user_choices[aspect.key] = selected_opt
+
+            criteria = advisor.refine_criteria(criteria, user_choices)
+            console.print(f"\n[bold green]✓ Criterios afinados con éxito:[/bold green]")
+            if criteria.min_ram_gb:
+                console.print(f"  • RAM mínima: [bold cyan]{criteria.min_ram_gb} GB[/bold cyan]")
+            if criteria.min_storage_gb:
+                console.print(f"  • Almacenamiento mínimo: [bold cyan]{criteria.min_storage_gb} GB[/bold cyan]")
+            if "barebone" in criteria.exclude_keywords:
+                console.print(f"  • Unidades: [bold cyan]Solo equipos completos (excluyendo Barebones)[/bold cyan]")
+            if criteria.key_specs:
+                console.print(f"  • Especificaciones clave: [bold cyan]{', '.join(criteria.key_specs)}[/bold cyan]")
 
     # Criterios y recomendaciones técnicas
     suggested = advisor.get_suggested_specs(criteria.category)

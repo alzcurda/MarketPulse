@@ -1,7 +1,8 @@
 import re
 import unicodedata
-from typing import Dict, List, Optional, Tuple
-from marketpulse.models import ProductCategory, SearchCriteria
+from typing import Any, Dict, List, Optional, Tuple
+from marketpulse.models import ProductCategory, RefinementAspect, SearchCriteria
+from marketpulse.core.llm_client import LLMClient
 
 
 class CriteriaAdvisor:
@@ -415,19 +416,23 @@ class CriteriaAdvisor:
         min_ram = None
         min_storage = None
 
-        # Requisito mínimo de RAM
+        # Requisito de RAM
         m_ram = re.search(r"(?:como mínimo|mínimo|al menos|desde)\s*(\d{1,2})\s*gb\s*(?:de\s*)?ram", text_lower)
         if not m_ram:
             m_ram = re.search(r"(\d{1,2})\s*gb\s*(?:de\s*)?ram\s*(?:como mínimo|mínimo|o más)", text_lower)
+        if not m_ram:
+            m_ram = re.search(r"(?:con|de)?\s*(\d{1,2})\s*gb\s*(?:de\s*)?ram\b", text_lower)
         if m_ram:
             min_ram = int(m_ram.group(1))
 
-        # Requisito mínimo de almacenamiento SSD
+        # Requisito de almacenamiento SSD
         m_storage = re.search(r"(?:como mínimo|mínimo|al menos|desde)\s*(\d{3,4})\s*gb(?:\s*o\s*(\d)\s*tb)?\s*(?:de\s*)?(?:ssd|disco|almacenamiento)", text_lower)
+        if not m_storage:
+            m_storage = re.search(r"(?:con|de)?\s*(\d{3,4})\s*gb\s*(?:de\s*)?(?:ssd|disco|almacenamiento|rom)\b", text_lower)
         if m_storage:
             min_storage = int(m_storage.group(1))
         else:
-            m_tb = re.search(r"(?:como mínimo|mínimo|al menos)\s*(\d)\s*tb", text_lower)
+            m_tb = re.search(r"(?:como mínimo|mínimo|al menos|con|de)?\s*(\d)\s*tb\s*(?:de\s*)?(?:ssd|disco|almacenamiento)?\b", text_lower)
             if m_tb:
                 min_storage = int(m_tb.group(1)) * 1024
 
@@ -586,9 +591,100 @@ class CriteriaAdvisor:
 
         return queries
 
-    def analyze_user_prompt(self, prompt: str) -> SearchCriteria:
-        """Analiza integralmente la entrada del usuario y genera un SearchCriteria estructurado."""
-        # 1. Separar requerimientos positivos de cláusulas de exclusión
+    def _build_criteria_from_llm(self, prompt: str, data: Dict[str, Any]) -> SearchCriteria:
+        """Construye un SearchCriteria a partir de la interpretación semántica universal del LLM."""
+        category_raw = str(data.get("category", "")).lower()
+        category = ProductCategory.GENERAL_TECH
+        for pc in ProductCategory:
+            if pc.value == category_raw or pc.name.lower() == category_raw:
+                category = pc
+                break
+
+        product_type_label = data.get("product_type") or "Dispositivo tecnológico"
+        product_type = re.sub(r"[^a-z0-9_]", "_", self.strip_accents(product_type_label).lower())
+        raw_brand = data.get("brand")
+        target_brand = str(raw_brand).strip().title() if raw_brand and str(raw_brand).lower() != "null" else None
+        raw_model = data.get("model")
+        target_model = str(raw_model).strip() if raw_model and str(raw_model).lower() != "null" else None
+        target_models = [target_model] if target_model else []
+        target_model_variants = self.generate_model_variants(target_model) if target_model else []
+
+        clean_query = data.get("clean_query") or self.clean_search_query(prompt, category)
+
+        # Precios
+        min_price = data.get("min_price")
+        max_price = data.get("max_price")
+        if min_price is None or max_price is None:
+            regex_min, regex_max = self.extract_budget(prompt)
+            if min_price is None:
+                min_price = regex_min
+            if max_price is None:
+                max_price = regex_max
+
+        # Hardware y CPUs
+        allowed_cpus = self.extract_allowed_cpus(prompt)
+        min_ram_gb, min_storage_gb = self.extract_hardware_limits(prompt)
+
+        key_specs = [str(s).strip() for s in data.get("key_specs", []) if s and str(s).strip()]
+        for ks in self.extract_key_specs(prompt):
+            if ks not in key_specs:
+                key_specs.append(ks)
+
+        is_generic = bool(data.get("is_generic", False))
+
+        refinement_aspects: List[RefinementAspect] = []
+        for aspect in data.get("refinement_aspects", []):
+            if isinstance(aspect, dict) and aspect.get("question") and aspect.get("options"):
+                refinement_aspects.append(
+                    RefinementAspect(
+                        key=aspect.get("key", "aspect"),
+                        question=aspect.get("question"),
+                        options=aspect.get("options", []),
+                        recommended_option=aspect.get("recommended_option"),
+                    )
+                )
+
+        target_queries = self.build_targeted_queries(
+            clean_query,
+            allowed_cpus,
+            min_ram_gb,
+            min_storage_gb,
+            target_model=target_model,
+            target_models=target_models,
+            target_brand=target_brand,
+        )
+
+        return SearchCriteria(
+            raw_query=prompt,
+            clean_query=clean_query,
+            category=category,
+            product_type=product_type,
+            product_type_label=product_type_label,
+            target_brand=target_brand,
+            target_series=target_model,
+            min_system_price=35.0,
+            min_price=min_price,
+            max_price=max_price,
+            key_specs=key_specs,
+            must_have_keywords=[],
+            exclude_keywords=self.extract_exclusions(prompt),
+            min_ram_gb=min_ram_gb,
+            min_storage_gb=min_storage_gb,
+            allowed_cpus=allowed_cpus,
+            max_price_by_cpu=self.extract_conditional_prices(prompt),
+            target_search_queries=target_queries,
+            target_model=target_model,
+            target_models=target_models,
+            target_model_variants=target_model_variants,
+            min_score_threshold=80.0,
+            ships_from_spain_only=True,
+            in_stock_only=True,
+            is_generic=is_generic,
+            refinement_aspects=refinement_aspects,
+        )
+
+    def _build_criteria_from_rules(self, prompt: str) -> SearchCriteria:
+        """Construye un SearchCriteria mediante reglas heurísticas locales (modo sin IA / offline)."""
         exclusion_markers = r"\b(?:descartando|excluyendo|evitando|sin\s+(?:procesador|equipos?|marcas?|amd|celeron)|no\s+quiero|nada\s+de|quitar|obviar)\b"
         parts = re.split(exclusion_markers, prompt, flags=re.I)
         positive_text = parts[0]
@@ -600,29 +696,18 @@ class CriteriaAdvisor:
 
         min_price, max_price = self.extract_budget(prompt)
         max_price_by_cpu = self.extract_conditional_prices(prompt)
-
-        # Si hay precios condicionales, asegurar que max_price sea el techo superior
         if max_price_by_cpu and (max_price is None or max(max_price_by_cpu.values()) > max_price):
             max_price = max(max_price_by_cpu.values())
 
-        # Extraer modelo(s) específico(s) si el usuario lo solicita
         target_model, target_models, target_model_variants = self.extract_target_models(positive_text)
         target_series = target_models[0] if target_models else None
 
-        # Extraer CPUs permitidas y límites de hardware
         allowed_cpus = self.extract_allowed_cpus(positive_text)
         min_ram_gb, min_storage_gb = self.extract_hardware_limits(positive_text)
-
-        # Especificaciones clave SOLO de la parte positiva
         key_specs = self.extract_key_specs(positive_text)
-
-        # Exclusiones SOLO de la parte negativa
         exclude_keywords = self.extract_exclusions(negative_text)
-
-        # Query limpia positiva para motores de búsqueda
         clean_query = self.clean_search_query(prompt, category)
 
-        # Consultas dirigidas segmentadas
         target_queries = self.build_targeted_queries(
             clean_query,
             allowed_cpus,
@@ -632,6 +717,36 @@ class CriteriaAdvisor:
             target_models=target_models,
             target_brand=target_brand,
         )
+
+        # Si es un equipo informático y no se especificó RAM o disco, marcar como genérico
+        is_generic = False
+        refinement_aspects: List[RefinementAspect] = []
+        if product_type in ["mini_pc", "laptop", "desktop"] and not min_ram_gb and not min_storage_gb:
+            is_generic = True
+            refinement_aspects = [
+                RefinementAspect(
+                    key="barebone",
+                    question="¿Aceptas equipos Barebone (sin RAM ni disco para montarlos tú) o solo completos con Windows?",
+                    options=[
+                        "Solo equipos completos listos para usar",
+                        "Solo Barebones (sin RAM ni disco)",
+                        "Cualquiera / Me da igual",
+                    ],
+                    recommended_option="Solo equipos completos listos para usar",
+                ),
+                RefinementAspect(
+                    key="ram",
+                    question="Memoria RAM mínima deseada",
+                    options=["16 GB (Recomendado)", "32 GB", "8 GB", "Cualquiera / Sin mínimo"],
+                    recommended_option="16 GB (Recomendado)",
+                ),
+                RefinementAspect(
+                    key="storage",
+                    question="Almacenamiento SSD mínimo deseado",
+                    options=["512 GB SSD (Recomendado)", "1 TB SSD", "256 GB SSD", "Cualquiera / Sin mínimo"],
+                    recommended_option="512 GB SSD (Recomendado)",
+                ),
+            ]
 
         return SearchCriteria(
             raw_query=prompt,
@@ -658,7 +773,83 @@ class CriteriaAdvisor:
             min_score_threshold=80.0,
             ships_from_spain_only=True,
             in_stock_only=True,
+            is_generic=is_generic,
+            refinement_aspects=refinement_aspects,
         )
+
+    def analyze_user_prompt(self, prompt: str) -> SearchCriteria:
+        """
+        Analiza integralmente la entrada del usuario y genera un SearchCriteria estructurado.
+        Si hay un motor LLM activo (Ollama local, Gemini, OpenAI), utiliza razonamiento semántico universal.
+        En caso contrario o si falla la conexión, recurre automáticamente al motor de reglas locales.
+        """
+        try:
+            llm_data = LLMClient.analyze_query(prompt)
+            if llm_data and isinstance(llm_data, dict):
+                return self._build_criteria_from_llm(prompt, llm_data)
+        except Exception:
+            pass
+
+        return self._build_criteria_from_rules(prompt)
+
+    def refine_criteria(self, criteria: SearchCriteria, selected_options: Dict[str, str]) -> SearchCriteria:
+        """
+        Aplica las opciones seleccionadas por el usuario en el paso interactivo de afinado
+        y actualiza las restricciones y consultas dirigidas hacia las tiendas.
+        """
+        for key, chosen_text in selected_options.items():
+            if not chosen_text:
+                continue
+            text_lower = chosen_text.lower()
+            if text_lower.startswith("cualquiera") or "indiferente" in text_lower or "me da igual" in text_lower or "sin minimo" in text_lower:
+                continue
+
+            # 1. Parámetro RAM
+            if key == "ram":
+                m = re.search(r"(\d+)\s*GB", chosen_text, re.I)
+                if m:
+                    criteria.min_ram_gb = int(m.group(1))
+
+            # 2. Parámetro Almacenamiento SSD
+            elif key in ["storage", "almacenamiento", "ssd"]:
+                m = re.search(r"(\d+)\s*(GB|TB)", chosen_text, re.I)
+                if m:
+                    val = int(m.group(1))
+                    if m.group(2).upper() == "TB":
+                        val *= 1024
+                    criteria.min_storage_gb = val
+
+            # 3. Parámetro Barebone
+            elif key == "barebone":
+                if "completos" in text_lower:
+                    if "barebone" not in criteria.exclude_keywords:
+                        criteria.exclude_keywords.append("barebone")
+                elif "solo barebone" in text_lower:
+                    if "barebone" not in criteria.must_have_keywords:
+                        criteria.must_have_keywords.append("barebone")
+
+            # 4. Parámetros universales de cualquier producto (ej: café, presión, potencia, motor)
+            else:
+                clean_choice = re.sub(r"\(.*?\)", "", chosen_text).strip()
+                if clean_choice and clean_choice not in criteria.key_specs:
+                    criteria.key_specs.append(clean_choice)
+                    refined_q = f"{criteria.clean_query} {clean_choice}"
+                    if refined_q not in criteria.target_search_queries:
+                        criteria.target_search_queries.insert(1, refined_q)
+
+        # Regenerar consultas dirigidas si se especificó RAM o disco
+        if criteria.min_ram_gb or criteria.min_storage_gb:
+            criteria.target_search_queries = self.build_targeted_queries(
+                criteria.clean_query,
+                criteria.allowed_cpus,
+                criteria.min_ram_gb,
+                criteria.min_storage_gb,
+                target_model=criteria.target_model,
+                target_models=criteria.target_models,
+                target_brand=criteria.target_brand,
+            )
+
+        return criteria
 
     def get_suggested_specs(self, category: ProductCategory) -> List[str]:
         """Devuelve consejos y especificaciones clave a tener en cuenta según categoría."""
