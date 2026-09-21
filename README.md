@@ -149,9 +149,34 @@ El motor heurístico local funcionará automáticamente.
 
 ---
 
-## 💻 Uso
+## 🌐 Interfaz Web Interactiva (Recomendada)
 
-Ejecuta el asistente interactivo en tu terminal:
+MarketPulse incluye una **aplicación web moderna, visual y reactiva**:
+* 🎙️ **Búsqueda por Voz:** Habla directamente usando el botón del micrófono (reconocimiento nativo sin librerías externas).
+* 🎛️ **Control Deck Dinámico:** Modifica especificaciones en vivo (RAM de 16GB a 32GB, arquitectura CPU, disco SSD, presupuesto o tiendas) con un solo clic y relanza la búsqueda inmediatamente sin reiniciar.
+* 📊 **Parrilla de Resultados Ordenable:** Ordena las ofertas por precio (menor a mayor / mayor a menor), afinidad (% Match) o tienda.
+* 🛡️ **Auditoría de Descartes Transparente:** Inspecciona qué productos fueron descartados y por qué motivo exacto (accesorios, piezas sueltas, etc.).
+
+### 🚀 Cómo arrancar la Web App:
+* **En Windows (un solo clic):**
+  Ejecuta el archivo `run_web.bat`.
+* **Desde la terminal:**
+  ```bash
+  python -m marketpulse.web
+  ```
+  Se abrirá automáticamente en tu navegador en `http://localhost:8000` (o accesible desde tu móvil u otros dispositivos en `http://TU_IP_LOCAL:8000`).
+
+### 🐳 Despliegue en NAS / Docker:
+MarketPulse está listo para ejecutarse en cualquier NAS (Synology Container Manager, QNAP Container Station, Unraid, Portainer):
+```bash
+docker-compose up -d
+```
+
+---
+
+## 💻 Uso desde Terminal (CLI)
+
+Si prefieres la interfaz tradicional por consola:
 
 ```bash
 python -m marketpulse.cli

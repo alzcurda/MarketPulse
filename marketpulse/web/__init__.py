@@ -1,0 +1,1 @@
+"""MarketPulse Web Application package."""

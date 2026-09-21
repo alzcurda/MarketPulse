@@ -1,0 +1,760 @@
+<!DOCTYPE html>
+<html lang="es" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MarketPulse • Asistente Inteligente de Compras Multitienda</title>
+  
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#ecfeff',
+              100: '#cffafe',
+              400: '#22d3ee',
+              500: '#06b6d4',
+              600: '#0891b2',
+            }
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <!-- Alpine.js Core -->
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.3/dist/cdn.min.js"></script>
+
+  <style>
+    [x-cloak] { display: none !important; }
+    /* Scrollbar personalizada */
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-track { background: #0f172a; }
+    ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: #475569; }
+    
+    @keyframes pulse-ring {
+      0% { transform: scale(0.95); opacity: 0.8; }
+      50% { transform: scale(1.15); opacity: 0.3; }
+      100% { transform: scale(0.95); opacity: 0.8; }
+    }
+    .listening-pulse {
+      animation: pulse-ring 1.6s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+    }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen font-sans antialiased selection:bg-cyan-500 selection:text-black"
+      x-data="marketPulseApp()" x-init="initApp()">
+
+  <!-- 1. Cabecera y Barra Superior -->
+  <header class="border-b border-slate-800/80 bg-slate-900/60 backdrop-blur-md sticky top-0 z-40">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+      
+      <!-- Logotipo -->
+      <div class="flex items-center space-x-3">
+        <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center shadow-lg shadow-cyan-500/20">
+          <i data-lucide="activity" class="w-6 h-6 text-black"></i>
+        </div>
+        <div>
+          <span class="font-extrabold text-xl tracking-tight bg-gradient-to-r from-cyan-400 to-blue-400 bg-clip-text text-transparent">MarketPulse</span>
+          <span class="text-xs px-2 py-0.5 ml-1.5 rounded-full bg-slate-800 text-slate-300 font-mono border border-slate-700">Web 2.0</span>
+        </div>
+      </div>
+
+      <!-- Estado del Motor Semántico (Gemini / Local) -->
+      <div class="flex items-center space-x-4">
+        <div class="hidden sm:flex items-center space-x-2 px-3 py-1.5 rounded-full bg-slate-900 border border-slate-800">
+          <span class="relative flex h-2.5 w-2.5">
+            <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+            <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+          </span>
+          <span class="text-xs text-slate-400 font-medium">Motor:</span>
+          <span class="text-xs font-semibold text-emerald-400" x-text="systemStatus.backend_label || 'Detectando motor...'"></span>
+        </div>
+        
+        <a href="#diagnostics" x-show="lastDiscards.length > 0" 
+           class="text-xs text-amber-400/90 hover:text-amber-300 flex items-center space-x-1 px-3 py-1.5 rounded-full bg-amber-500/10 border border-amber-500/30 transition">
+          <i data-lucide="shield-alert" class="w-3.5 h-3.5"></i>
+          <span x-text="lastDiscards.length + ' descartados'"></span>
+        </a>
+      </div>
+
+    </div>
+  </header>
+
+  <!-- 2. Contenido Principal -->
+  <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+
+    <!-- Sección de Búsqueda Inteligente -->
+    <section class="max-w-4xl mx-auto text-center space-y-5">
+      <div class="space-y-2">
+        <h1 class="text-3xl sm:text-4xl font-extrabold tracking-tight text-white">
+          Buscador de Chollos y Comparador Multitienda
+        </h1>
+        <p class="text-slate-400 text-sm sm:text-base max-w-2xl mx-auto">
+          Escribe lo que buscas o pulsa el micrófono. Nuestro asistente con IA extraerá automáticamente especificaciones, tiendas clave y opciones configurables.
+        </p>
+      </div>
+
+      <!-- Barra de Entrada y Voz -->
+      <div class="relative flex items-center shadow-2xl rounded-2xl bg-slate-900 border-2 transition-all duration-300"
+           :class="isListening ? 'border-red-500 ring-4 ring-red-500/20' : 'border-slate-700 hover:border-slate-600 focus-within:border-cyan-500 focus-within:ring-4 focus-within:ring-cyan-500/20'">
+        
+        <div class="pl-4 text-slate-400">
+          <i data-lucide="search" class="w-5 h-5"></i>
+        </div>
+
+        <input type="text"
+               x-model="searchQuery"
+               @keydown.enter="handleAnalyze()"
+               placeholder="ej: 'gmktec g10 mini pc' o 'cafetera superautomática de grano'..."
+               class="w-full bg-transparent py-4 px-3 text-slate-100 placeholder-slate-500 focus:outline-none text-base sm:text-lg" />
+
+        <!-- Botón de Micrófono (Dictado por Voz) -->
+        <button type="button"
+                @click="toggleVoiceRecognition()"
+                :title="isListening ? 'Detener grabación' : 'Buscar por voz'"
+                class="relative mr-2 p-2.5 rounded-xl transition-all flex items-center justify-center"
+                :class="isListening ? 'bg-red-500 text-white listening-pulse' : 'text-slate-400 hover:text-cyan-400 hover:bg-slate-800'">
+          <i data-lucide="mic" class="w-5 h-5"></i>
+          <span x-show="isListening" class="absolute -top-8 bg-red-600 text-[10px] text-white px-2 py-0.5 rounded-full font-bold uppercase tracking-wider animate-pulse">
+            Escuchando...
+          </span>
+        </button>
+
+        <!-- Botón de Analizar / Buscar -->
+        <button type="button"
+                @click="handleAnalyze()"
+                :disabled="isAnalyzing || !searchQuery.trim()"
+                class="mr-2 px-5 py-2.5 rounded-xl font-semibold text-sm bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-black shadow-lg shadow-cyan-500/25 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2">
+          <span x-show="!isAnalyzing">Analizar</span>
+          <span x-show="isAnalyzing" class="flex items-center space-x-2">
+            <svg class="animate-spin h-4 w-4 text-black" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            <span>Analizando...</span>
+          </span>
+        </button>
+      </div>
+
+      <!-- Indicador de Grabación Activa en Modo Continuo -->
+      <div x-show="isListening" x-cloak class="flex flex-wrap items-center justify-center gap-3 p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-300 text-xs font-medium">
+        <div class="flex items-center space-x-2">
+          <span class="relative flex h-2.5 w-2.5">
+            <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+            <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500"></span>
+          </span>
+          <span>🎙️ <strong>Grabando en modo continuo:</strong> Puedes hablar todo el tiempo que quieras y hacer pausas sin que se corte.</span>
+        </div>
+        <button @click="stopListeningAndSearch()" 
+                class="px-3 py-1 bg-red-600 hover:bg-red-500 text-white rounded-lg font-bold text-xs shadow-md shadow-red-600/30 transition flex items-center space-x-1">
+          <span>Terminar y Buscar</span>
+          <i data-lucide="arrow-right" class="w-3.5 h-3.5"></i>
+        </button>
+      </div>
+
+      <!-- Sugerencias Rápidas -->
+      <div class="flex flex-wrap items-center justify-center gap-2 pt-1">
+        <span class="text-xs text-slate-500 font-medium mr-1">Prueba con:</span>
+        <button @click="applyQuickQuery('gmktec g10 mini pc')" class="text-xs px-3 py-1 rounded-full bg-slate-900 border border-slate-800 text-slate-300 hover:border-cyan-500/50 hover:text-cyan-400 transition">
+          💻 GMKtec G10 Mini PC
+        </button>
+        <button @click="applyQuickQuery('cafetera superautomatica delonghi')" class="text-xs px-3 py-1 rounded-full bg-slate-900 border border-slate-800 text-slate-300 hover:border-cyan-500/50 hover:text-cyan-400 transition">
+          ☕ Cafetera De'Longhi
+        </button>
+        <button @click="applyQuickQuery('taladro percutor bateria dewalt 18v')" class="text-xs px-3 py-1 rounded-full bg-slate-900 border border-slate-800 text-slate-300 hover:border-cyan-500/50 hover:text-cyan-400 transition">
+          🛠️ Taladro DeWalt 18V
+        </button>
+      </div>
+    </section>
+
+    <!-- 3. Control Deck Dinámico (Panel de Criterios y Afinado Reajustable) -->
+    <section x-show="analysisData" x-cloak class="max-w-5xl mx-auto">
+      <div class="bg-slate-900/90 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-6">
+        
+        <!-- Cabecera del Panel: Categoría y Marca detectada -->
+        <div class="flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-slate-800">
+          <div class="flex items-center space-x-3">
+            <div class="p-2 rounded-lg bg-cyan-500/10 border border-cyan-500/30 text-cyan-400">
+              <i data-lucide="sliders" class="w-5 h-5"></i>
+            </div>
+            <div>
+              <div class="flex items-center space-x-2">
+                <span class="font-bold text-lg text-white" x-text="analysisData.product_type_label || 'Configuración del Producto'"></span>
+                <span x-show="analysisData.target_brand" class="text-xs font-semibold px-2 py-0.5 rounded bg-blue-500/20 text-blue-300 border border-blue-500/30" x-text="'Marca: ' + analysisData.target_brand"></span>
+                <span x-show="analysisData.target_model" class="text-xs font-semibold px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30" x-text="'Modelo: ' + analysisData.target_model"></span>
+              </div>
+              <p class="text-xs text-slate-400 mt-0.5">
+                Modifica cualquier parámetro con un clic y actualiza la búsqueda en vivo sin reiniciar.
+              </p>
+            </div>
+          </div>
+
+          <!-- Botón Principal: Actualizar Búsqueda -->
+          <button @click="executeSearch()"
+                  :disabled="isSearching"
+                  class="px-6 py-2.5 rounded-xl font-bold text-sm bg-gradient-to-r from-emerald-400 to-teal-500 hover:from-emerald-300 hover:to-teal-400 text-black shadow-lg shadow-emerald-500/20 transition-all flex items-center space-x-2 disabled:opacity-50">
+            <span x-show="!isSearching">🔍 Buscar en Tiendas</span>
+            <span x-show="isSearching" class="flex items-center space-x-2">
+              <svg class="animate-spin h-4 w-4 text-black" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+              <span>Rastreando tiendas...</span>
+            </span>
+          </button>
+        </div>
+
+        <!-- Aspectos Dinámicos (Chips Interactivos generados por IA o reglas) -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6" x-show="analysisData.refinement_aspects && analysisData.refinement_aspects.length > 0">
+          <template x-for="aspect in analysisData.refinement_aspects" :key="aspect.key">
+            <div class="space-y-2 p-4 rounded-xl bg-slate-950/60 border border-slate-800/80">
+              <label class="block text-xs font-semibold text-slate-300 uppercase tracking-wider" x-text="aspect.question"></label>
+              <div class="flex flex-wrap gap-2 pt-1">
+                <template x-for="option in aspect.options" :key="option">
+                  <button type="button"
+                          @click="selectRefinement(aspect.key, option)"
+                          class="text-xs px-3 py-1.5 rounded-lg border transition-all flex items-center space-x-1"
+                          :class="selectedRefinements[aspect.key] === option 
+                            ? 'bg-cyan-500/20 border-cyan-400 text-cyan-200 font-bold shadow-sm shadow-cyan-500/30' 
+                            : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700 hover:text-slate-200'">
+                    <span x-text="option"></span>
+                    <span x-show="option === aspect.recommended_option && selectedRefinements[aspect.key] !== option" 
+                          class="text-[9px] px-1 py-0.2 ml-1 rounded bg-amber-500/20 text-amber-300 font-medium">★</span>
+                  </button>
+                </template>
+              </div>
+            </div>
+          </template>
+        </div>
+
+        <!-- Filtros adicionales: Presupuesto y Tiendas -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 pt-2">
+          
+          <!-- Presupuesto Máximo -->
+          <div class="p-4 rounded-xl bg-slate-950/60 border border-slate-800/80 space-y-2">
+            <label class="block text-xs font-semibold text-slate-300 uppercase tracking-wider">Presupuesto Máximo (€)</label>
+            <div class="flex items-center space-x-2">
+              <input type="number" 
+                     x-model.number="analysisData.max_price"
+                     placeholder="Sin límite"
+                     class="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-cyan-500" />
+              <button @click="analysisData.max_price = null" class="text-xs text-slate-500 hover:text-slate-300 px-2">Limpiar</button>
+            </div>
+          </div>
+
+          <!-- Selector de Tiendas Activas (2 columnas de ancho) -->
+          <div class="md:col-span-2 p-4 rounded-xl bg-slate-950/60 border border-slate-800/80 space-y-2">
+            <div class="flex items-center justify-between">
+              <label class="block text-xs font-semibold text-slate-300 uppercase tracking-wider">Tiendas a Consultar</label>
+              <div class="flex items-center space-x-2 text-xs">
+                <button @click="selectAllStores(true)" class="text-cyan-400 hover:underline">Todas</button>
+                <span class="text-slate-600">|</span>
+                <button @click="selectRecommendedStores()" class="text-slate-400 hover:underline">Solo Sugeridas</button>
+              </div>
+            </div>
+            <div class="flex flex-wrap gap-2 pt-1">
+              <template x-for="store in allAvailableStores" :key="store.id">
+                <button type="button"
+                        @click="toggleStore(store.id)"
+                        class="text-xs px-3 py-1.5 rounded-lg border transition-all flex items-center space-x-1.5"
+                        :class="selectedStores.includes(store.id)
+                          ? 'bg-slate-800 border-slate-600 text-white font-medium shadow-sm'
+                          : 'bg-slate-950 border-slate-900 text-slate-500 opacity-60 hover:opacity-100'">
+                  <span class="w-2 h-2 rounded-full" :style="'background-color:' + store.color"></span>
+                  <span x-text="store.name"></span>
+                </button>
+              </template>
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+    </section>
+
+    <!-- 4. Indicador de Progreso durante Búsqueda -->
+    <div x-show="isSearching" x-cloak class="max-w-md mx-auto p-6 rounded-2xl bg-slate-900 border border-slate-800 text-center space-y-3">
+      <div class="inline-flex items-center justify-center p-3 rounded-full bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 animate-spin">
+        <i data-lucide="loader-2" class="w-8 h-8"></i>
+      </div>
+      <h3 class="text-lg font-bold text-white">Rastreando tiendas en tiempo real...</h3>
+      <p class="text-xs text-slate-400">
+        Consultando AliExpress, Amazon, PcComponentes y verificando autenticidad de cada producto para descartar accesorios o piezas sueltas.
+      </p>
+    </div>
+
+    <!-- 5. Parrilla de Resultados Interactiva -->
+    <section x-show="searchResults && searchResults.products" x-cloak class="space-y-6">
+      
+      <!-- Barra de Resumen y Ordenación -->
+      <div class="flex flex-wrap items-center justify-between gap-4 p-4 rounded-xl bg-slate-900 border border-slate-800">
+        <div>
+          <span class="font-extrabold text-lg text-white" x-text="sortedProducts.length + ' ofertas encontradas'"></span>
+          <span class="text-xs text-slate-400 ml-2" x-text="'(de ' + searchResults.total_raw + ' candidatos recopilados)'"></span>
+        </div>
+
+        <!-- Controles de Ordenación y Filtro Rápido -->
+        <div class="flex items-center space-x-4">
+          <!-- Filtro rápido en vivo -->
+          <div class="relative">
+            <input type="text" 
+                   x-model="clientFilter" 
+                   placeholder="Filtrar por texto..." 
+                   class="bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 w-44" />
+          </div>
+
+          <!-- Selector de Ordenación -->
+          <div class="flex items-center space-x-2 text-xs">
+            <span class="text-slate-400 font-medium">Ordenar:</span>
+            <select x-model="sortBy" class="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-cyan-300 focus:outline-none focus:border-cyan-500 font-semibold cursor-pointer">
+              <option value="price_asc">💰 Precio: Menor a Mayor</option>
+              <option value="price_desc">💎 Precio: Mayor a Menor</option>
+              <option value="score_desc">🎯 Mejor Coincidencia (% Match)</option>
+              <option value="store_name">🏪 Tienda (A-Z)</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tarjetas de Productos -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+        <template x-for="(product, idx) in sortedProducts" :key="idx">
+          <div class="bg-slate-900 border border-slate-800 hover:border-cyan-500/50 rounded-2xl p-5 flex flex-col justify-between space-y-4 shadow-lg hover:shadow-cyan-500/10 transition-all group">
+            
+            <!-- Cabecera de la tarjeta: Tienda y Score -->
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-bold px-2.5 py-1 rounded-full text-white flex items-center space-x-1.5 shadow-sm"
+                    :style="'background-color:' + product.store_color">
+                <span x-text="product.store_name"></span>
+              </span>
+
+              <div class="flex items-center space-x-1 px-2 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-mono font-bold">
+                <i data-lucide="award" class="w-3 h-3"></i>
+                <span x-text="product.score + '% Match'"></span>
+              </div>
+            </div>
+
+            <!-- Título del Producto -->
+            <h4 class="font-semibold text-sm text-slate-100 line-clamp-3 group-hover:text-cyan-300 transition-colors"
+                x-text="product.title"
+                :title="product.title">
+            </h4>
+
+            <!-- Bloque de Precio y Envío -->
+            <div class="pt-2 border-t border-slate-800/80">
+              <div class="flex items-baseline space-x-2">
+                <span class="text-2xl font-black text-white" x-text="formatPrice(product.price)"></span>
+                <span x-show="product.original_price && product.original_price > product.price" 
+                      class="text-xs text-slate-500 line-through" 
+                      x-text="formatPrice(product.original_price)"></span>
+              </div>
+
+              <!-- Badges de envío y estado -->
+              <div class="flex flex-wrap gap-1.5 mt-2">
+                <span x-show="product.ships_from_spain" class="text-[10px] font-semibold px-2 py-0.5 rounded bg-blue-500/10 text-blue-300 border border-blue-500/20">
+                  🇪🇸 Envío España / UE
+                </span>
+                <template x-for="spec in (product.matched_specs || []).slice(0, 3)" :key="spec">
+                  <span class="text-[10px] font-semibold px-2 py-0.5 rounded bg-slate-800 text-cyan-300 border border-slate-700" x-text="spec"></span>
+                </template>
+                <span x-show="product.in_stock" class="text-[10px] font-semibold px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-300 border border-emerald-500/20">
+                  ✓ En stock
+                </span>
+              </div>
+            </div>
+
+            <!-- Botón de Compra Directa -->
+            <a :href="product.url" 
+               target="_blank" 
+               rel="noopener noreferrer"
+               class="w-full py-2.5 px-4 rounded-xl font-bold text-xs text-center bg-slate-800 hover:bg-gradient-to-r hover:from-cyan-500 hover:to-blue-600 hover:text-black text-slate-200 border border-slate-700 hover:border-transparent transition-all flex items-center justify-center space-x-2 shadow-sm">
+              <span>Ver en Tienda</span>
+              <i data-lucide="external-link" class="w-3.5 h-3.5"></i>
+            </a>
+
+          </div>
+        </template>
+      </div>
+
+      <!-- Estado Vacío -->
+      <div x-show="sortedProducts.length === 0" class="text-center py-12 p-6 rounded-2xl bg-slate-900 border border-slate-800 space-y-3">
+        <i data-lucide="frown" class="w-10 h-10 text-slate-500 mx-auto"></i>
+        <h4 class="text-base font-bold text-white">No hay productos que coincidan con estos filtros exactos</h4>
+        <p class="text-xs text-slate-400 max-w-md mx-auto">
+          Prueba a relajar algún requisito (por ejemplo, cambiar RAM a "Cualquiera", aumentar el presupuesto máximo o activar más tiendas).
+        </p>
+      </div>
+
+    </section>
+
+    <!-- 6. Panel Desplegable de Diagnóstico y Descartados -->
+    <section id="diagnostics" x-show="lastDiscards.length > 0" x-cloak class="max-w-5xl mx-auto pt-6">
+      <details class="group bg-slate-900/60 border border-amber-500/30 rounded-2xl p-5 open:bg-slate-900 transition-all">
+        <summary class="cursor-pointer font-bold text-sm text-amber-400 flex items-center justify-between list-none">
+          <div class="flex items-center space-x-2">
+            <i data-lucide="shield-alert" class="w-4 h-4"></i>
+            <span x-text="'Auditoría de Filtrado Inteligente: ' + lastDiscards.length + ' candidatos descartados'"></span>
+          </div>
+          <span class="text-xs font-normal text-slate-400 group-open:rotate-180 transition-transform">▼</span>
+        </summary>
+        
+        <div class="mt-4 space-y-4 pt-3 border-t border-slate-800">
+          <p class="text-xs text-slate-400">
+            MarketPulse descarta activamente accesorios engañosos (cables, fuentes, soportes VESA, bombillas) y modelos que no coinciden con las especificaciones exigidas para protegerte de falsos chollos.
+          </p>
+
+          <!-- Desglose de Causas -->
+          <div class="flex flex-wrap gap-2">
+            <template x-for="(count, reason) in searchResults?.discard_summary || {}" :key="reason">
+              <span class="text-xs px-2.5 py-1 rounded bg-amber-500/10 border border-amber-500/20 text-amber-300 font-mono">
+                <strong x-text="count"></strong> x <span x-text="reason"></span>
+              </span>
+            </template>
+          </div>
+
+          <!-- Tabla de descartados -->
+          <div class="overflow-x-auto max-h-72 overflow-y-auto">
+            <table class="w-full text-left text-xs border-collapse">
+              <thead>
+                <tr class="border-b border-slate-800 text-slate-400 font-mono uppercase text-[10px]">
+                  <th class="py-2 px-3">Tienda</th>
+                  <th class="py-2 px-3">Producto Descartado</th>
+                  <th class="py-2 px-3 text-right">Precio</th>
+                  <th class="py-2 px-3">Causa de Descarte</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-800/60 text-slate-300">
+                <template x-for="(item, i) in lastDiscards.slice(0, 30)" :key="i">
+                  <tr>
+                    <td class="py-2 px-3 font-semibold text-cyan-400" x-text="item.store_name"></td>
+                    <td class="py-2 px-3 truncate max-w-xs" :title="item.title" x-text="item.title"></td>
+                    <td class="py-2 px-3 text-right font-mono" x-text="formatPrice(item.price)"></td>
+                    <td class="py-2 px-3 text-red-400 font-medium" x-text="item.reason + (item.detail ? ' (' + item.detail + ')' : '')"></td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </details>
+    </section>
+
+  </main>
+
+  <!-- 7. Script de Aplicación Reactiva con Alpine.js -->
+  <script>
+    function marketPulseApp() {
+      return {
+        systemStatus: {},
+        searchQuery: '',
+        isListening: false,
+        isAnalyzing: false,
+        isSearching: false,
+        recognition: null,
+
+        analysisData: null,
+        selectedRefinements: {},
+        selectedStores: ['aliexpress_es', 'amazon_es', 'pccomponentes'],
+        allAvailableStores: [],
+
+        searchResults: null,
+        lastDiscards: [],
+        clientFilter: '',
+        sortBy: 'price_asc',
+
+        initApp() {
+          this.fetchSystemStatus();
+          this.initVoiceRecognition();
+          this.$nextTick(() => { lucide.createIcons(); });
+        },
+
+        async fetchSystemStatus() {
+          try {
+            const res = await fetch('/api/status');
+            if (res.ok) {
+              const data = await res.json();
+              this.systemStatus = data;
+              this.allAvailableStores = data.available_stores || [];
+            }
+          } catch (e) {
+            console.error('Error fetching status:', e);
+          }
+        },
+
+        silenceTimer: null,
+        finalTranscript: '',
+
+        initVoiceRecognition() {
+          const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+          if (!SpeechRecognition) {
+            console.warn('Speech recognition not supported in this browser.');
+            return;
+          }
+          this.recognition = new SpeechRecognition();
+          this.recognition.lang = 'es-ES';
+          // Activar modo continuo para que NO se corte a los 5 segundos
+          this.recognition.continuous = true;
+          this.recognition.interimResults = true;
+
+          this.recognition.onstart = () => {
+            this.isListening = true;
+            this.resetSilenceTimer();
+          };
+
+          this.recognition.onresult = (event) => {
+            let interim = '';
+            for (let i = event.resultIndex; i < event.results.length; i++) {
+              const res = event.results[i];
+              if (res.isFinal) {
+                this.finalTranscript += res[0].transcript + ' ';
+              } else {
+                interim += res[0].transcript;
+              }
+            }
+            const fullText = (this.finalTranscript + interim).trim();
+            if (fullText) {
+              this.searchQuery = fullText;
+            }
+            // Cada vez que detecta voz, reiniciamos el temporizador de silencio
+            this.resetSilenceTimer();
+          };
+
+          this.recognition.onerror = (event) => {
+            console.warn('Speech error:', event.error);
+            if (event.error === 'no-speech') {
+              // Simplemente no hubo sonido en un fragmento, no interrumpir
+              return;
+            }
+            if (event.error === 'audio-capture' || event.error === 'not-allowed') {
+              this.isListening = false;
+              this.clearSilenceTimer();
+              alert('No se pudo acceder al micrófono. Por favor comprueba los permisos en tu navegador.');
+            }
+          };
+
+          this.recognition.onend = () => {
+            // Si el usuario sigue grabando (no ha pulsado parar ni expiró el silencio) y el navegador cerró el stream, reconectar
+            if (this.isListening) {
+              try {
+                this.recognition.start();
+                return;
+              } catch (e) {
+                // Si el navegador no permite reabrir inmediato, finalizar
+              }
+            }
+            this.isListening = false;
+            this.clearSilenceTimer();
+          };
+        },
+
+        resetSilenceTimer() {
+          this.clearSilenceTimer();
+          // Espera 4 segundos de silencio completo tras dejar de hablar para lanzar la búsqueda automáticamente
+          this.silenceTimer = setTimeout(() => {
+            if (this.isListening) {
+              this.stopListeningAndSearch();
+            }
+          }, 4000);
+        },
+
+        clearSilenceTimer() {
+          if (this.silenceTimer) {
+            clearTimeout(this.silenceTimer);
+            this.silenceTimer = null;
+          }
+        },
+
+        stopListeningAndSearch() {
+          this.isListening = false;
+          this.clearSilenceTimer();
+          if (this.recognition) {
+            try { this.recognition.stop(); } catch(e) {}
+          }
+          if (this.searchQuery.trim().length > 3 && !this.isAnalyzing) {
+            this.handleAnalyze();
+          }
+        },
+
+        toggleVoiceRecognition() {
+          if (!this.recognition) {
+            alert('Tu navegador no soporta reconocimiento de voz nativo (Web Speech API). Por favor usa Google Chrome, Edge o Safari.');
+            return;
+          }
+          if (this.isListening) {
+            // Si estaba escuchando, el usuario pulsa para parar y buscar de inmediato
+            this.stopListeningAndSearch();
+          } else {
+            this.finalTranscript = '';
+            this.searchQuery = '';
+            this.isListening = true;
+            try {
+              this.recognition.start();
+              this.resetSilenceTimer();
+            } catch (e) {
+              console.error('Cannot start recognition:', e);
+              this.isListening = false;
+            }
+          }
+        },
+
+        applyQuickQuery(query) {
+          this.searchQuery = query;
+          this.handleAnalyze();
+        },
+
+        async handleAnalyze() {
+          const q = this.searchQuery.trim();
+          if (!q) return;
+
+          this.isAnalyzing = true;
+          try {
+            const res = await fetch('/api/analyze', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ query: q })
+            });
+
+            if (!res.ok) throw new Error('Error al analizar criterios');
+            const data = await res.json();
+            this.analysisData = data;
+
+            // Inicializar opciones de refinamiento seleccionadas con las recomendadas
+            this.selectedRefinements = {};
+            if (data.refinement_aspects) {
+              data.refinement_aspects.forEach(asp => {
+                this.selectedRefinements[asp.key] = asp.recommended_option || asp.options[0];
+              });
+            }
+
+            // Seleccionar tiendas recomendadas
+            if (data.recommended_stores && data.recommended_stores.length > 0) {
+              this.selectedStores = data.recommended_stores
+                .filter(s => s.enabled_by_default)
+                .map(s => s.store_id);
+            }
+
+            this.$nextTick(() => { lucide.createIcons(); });
+
+            // Ejecutar la primera búsqueda automáticamente con los valores recomendados
+            this.executeSearch();
+
+          } catch (e) {
+            alert('Error en análisis: ' + e.message);
+          } finally {
+            this.isAnalyzing = false;
+          }
+        },
+
+        selectRefinement(key, option) {
+          this.selectedRefinements[key] = option;
+        },
+
+        toggleStore(storeId) {
+          if (this.selectedStores.includes(storeId)) {
+            if (this.selectedStores.length > 1) {
+              this.selectedStores = this.selectedStores.filter(id => id !== storeId);
+            }
+          } else {
+            this.selectedStores.push(storeId);
+          }
+        },
+
+        selectAllStores(all) {
+          this.selectedStores = this.allAvailableStores.map(s => s.id);
+        },
+
+        selectRecommendedStores() {
+          if (this.analysisData && this.analysisData.recommended_stores) {
+            this.selectedStores = this.analysisData.recommended_stores.map(s => s.store_id);
+          } else {
+            this.selectedStores = ['aliexpress_es', 'amazon_es', 'pccomponentes'];
+          }
+        },
+
+        async executeSearch() {
+          if (!this.analysisData) return;
+          this.isSearching = true;
+
+          try {
+            const payload = {
+              raw_query: this.analysisData.raw_query || this.searchQuery,
+              clean_query: this.analysisData.clean_query || this.searchQuery,
+              category: this.analysisData.category,
+              product_type: this.analysisData.product_type,
+              product_type_label: this.analysisData.product_type_label,
+              target_brand: this.analysisData.target_brand,
+              target_model: this.analysisData.target_model,
+              target_models: this.analysisData.target_models || [],
+              min_price: this.analysisData.min_price,
+              max_price: this.analysisData.max_price,
+              min_ram_gb: this.analysisData.min_ram_gb,
+              min_storage_gb: this.analysisData.min_storage_gb,
+              allowed_cpus: this.analysisData.allowed_cpus || [],
+              must_have_keywords: this.analysisData.must_have_keywords || [],
+              exclude_keywords: this.analysisData.exclude_keywords || [],
+              selected_stores: this.selectedStores,
+              selected_refinements: this.selectedRefinements
+            };
+
+            const res = await fetch('/api/search', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload)
+            });
+
+            if (!res.ok) throw new Error('Fallo al ejecutar búsqueda multitienda');
+            const data = await res.json();
+            this.searchResults = data;
+            this.lastDiscards = data.discards || [];
+
+            this.$nextTick(() => { lucide.createIcons(); });
+
+          } catch (e) {
+            alert('Error en búsqueda: ' + e.message);
+          } finally {
+            this.isSearching = false;
+          }
+        },
+
+        get sortedProducts() {
+          if (!this.searchResults || !this.searchResults.products) return [];
+          let list = [...this.searchResults.products];
+
+          // Filtro de texto del cliente
+          if (this.clientFilter.trim()) {
+            const f = this.clientFilter.toLowerCase();
+            list = list.filter(p => p.title.toLowerCase().includes(f) || p.store_name.toLowerCase().includes(f));
+          }
+
+          // Ordenación
+          if (this.sortBy === 'price_asc') {
+            list.sort((a, b) => a.price - b.price);
+          } else if (this.sortBy === 'price_desc') {
+            list.sort((a, b) => b.price - a.price);
+          } else if (this.sortBy === 'score_desc') {
+            list.sort((a, b) => b.score - a.score);
+          } else if (this.sortBy === 'store_name') {
+            list.sort((a, b) => a.store_name.localeCompare(b.store_name));
+          }
+
+          return list;
+        },
+
+        formatPrice(val) {
+          if (val === null || val === undefined || val === 0) return '-';
+          return new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' }).format(val);
+        }
+      }
+    }
+  </script>
+</body>
+</html>
