@@ -21,7 +21,10 @@ from marketpulse.stores.pccomponentes import PcComponentesProvider
 from marketpulse.stores.amazon_es import AmazonEsProvider
 from marketpulse.stores.mediamarkt import MediaMarktProvider
 from marketpulse.stores.aliexpress_es import AliExpressEsProvider
-from marketpulse.models import ProductResult, SearchCriteria
+from marketpulse.stores.wallapop import WallapopProvider
+from marketpulse.stores.cex_es import CexProvider
+from marketpulse.stores.backmarket_es import BackMarketProvider
+from marketpulse.models import DiscardReason, ProductResult, SearchCriteria
 
 
 console = Console()
@@ -31,6 +34,9 @@ STORE_PROVIDER_MAP: Dict[str, Type[BaseStoreProvider]] = {
     "amazon_es": AmazonEsProvider,
     "mediamarkt": MediaMarktProvider,
     "aliexpress_es": AliExpressEsProvider,
+    "wallapop": WallapopProvider,
+    "cex_es": CexProvider,
+    "backmarket_es": BackMarketProvider,
 }
 
 
@@ -39,7 +45,58 @@ def print_banner():
         "[bold cyan]MarketPulse[/bold cyan] [white]• Asistente Inteligente de Compras y Búsqueda Multitienda[/white]\n"
         "[dim]Especializado en el mercado español • Búsqueda limpia bajo demanda • Sin aduanas sorpresa[/dim]"
     )
-    console.print(Panel(banner_text, border_style="cyan", expand=False))
+def render_discard_diagnostics(aggregator: Aggregator, total_raw: int, max_items: int = 25):
+    """Muestra el panel de diagnóstico cuantitativo y la tabla detallada de candidatos descartados."""
+    discards = aggregator.last_discard_records
+    if not discards:
+        return
+
+    summary = aggregator.get_discard_summary()
+
+    summary_lines = [
+        f"[bold white]Total de candidatos recopilados:[/bold white] {total_raw} | [bold white]Total descartados:[/bold white] [yellow]{len(discards)}[/yellow]\n",
+        "[bold cyan]Desglose por motivo de descarte:[/bold cyan]"
+    ]
+    for reason_label, count in sorted(summary.items(), key=lambda x: -x[1]):
+        pct = (count / len(discards)) * 100
+        summary_lines.append(f"  • [bold yellow]{count:>3}[/bold yellow] ({pct:>4.1f}%): {reason_label}")
+
+    diag_panel = Panel(
+        "\n".join(summary_lines),
+        title="[bold yellow]🔍 Auditoría y Diagnóstico de Filtrado (Candidatos Descartados)[/bold yellow]",
+        border_style="yellow",
+        expand=True
+    )
+    console.print("\n", diag_panel)
+
+    # Tabla detallada de descartes
+    d_table = Table(
+        title=f"[bold]Listado de Candidatos Descartados[/bold] [dim](mostrando {min(len(discards), max_items)} de {len(discards)})[/dim]",
+        show_header=True,
+        header_style="bold yellow",
+        expand=True
+    )
+    d_table.add_column("#", justify="right", style="dim", width=4)
+    d_table.add_column("Tienda", style="bold cyan", width=16)
+    d_table.add_column("Producto", style="white", min_width=25)
+    d_table.add_column("Precio", justify="right", style="dim white", width=12)
+    d_table.add_column("Causa del Descarte", style="bold red", width=24)
+    d_table.add_column("Detalle Técnico", style="dim yellow", min_width=30)
+
+    for idx, rec in enumerate(discards[:max_items], 1):
+        price_str = f"{rec.product.price:,.2f} €" if rec.product.price > 0 else "-"
+        d_table.add_row(
+            str(idx),
+            rec.product.store_name,
+            rec.product.title[:55] + ("..." if len(rec.product.title) > 55 else ""),
+            price_str,
+            rec.reason.value,
+            rec.detail
+        )
+
+    console.print(d_table)
+    if len(discards) > max_items:
+        console.print(f"\n[dim]Nota: Se omitieron {len(discards) - max_items} productos adicionales en la tabla por brevedad en pantalla.[/dim]\n")
 
 
 def run_interactive_session():
@@ -64,7 +121,27 @@ def run_interactive_session():
         criteria: SearchCriteria = advisor.analyze_user_prompt(user_prompt)
 
     console.print(f"\n[bold green]✓ Categoría detectada:[/bold green] [cyan]{criteria.category.value.upper()}[/cyan]")
+    if criteria.product_type_label:
+        console.print(f"[bold green]✓ Tipo de artículo:[/bold green] [bold cyan]{criteria.product_type_label}[/bold cyan]")
+    if criteria.target_brand:
+        console.print(f"[bold green]✓ Marca objetivo:[/bold green] [bold cyan]{criteria.target_brand}[/bold cyan]")
+    if criteria.target_models or criteria.target_model:
+        models_display = ", ".join(criteria.target_models or [criteria.target_model])
+        console.print(f"[bold green]✓ Modelo / Serie:[/bold green] [bold cyan]{models_display}[/bold cyan]")
     console.print(f"[bold green]✓ Término optimizado de búsqueda:[/bold green] [bold white]'{criteria.clean_query}'[/bold white]")
+
+    # Validador interactivo del tipo de artículo
+    type_display = criteria.product_type_label or criteria.category.value.upper()
+    brand_display = f" de {criteria.target_brand}" if criteria.target_brand else ""
+    validate_type = Confirm.ask(
+        f"\n¿Confirmas que buscas [bold cyan]{type_display}{brand_display}[/bold cyan]?",
+        default=True
+    )
+    if not validate_type:
+        console.print("[dim]Puedes precisar la marca o tipo exacto (ej: 'mini pc trigkey'):[/dim]")
+        refined_prompt = Prompt.ask("Especifica el tipo de artículo o marca", default=user_prompt)
+        criteria = advisor.analyze_user_prompt(refined_prompt)
+        console.print(f"  [bold green]✓ Criterios reajustados:[/bold green] {criteria.product_type_label} | Marca: {criteria.target_brand or 'Cualquiera'}")
 
     # Criterios y recomendaciones técnicas
     suggested = advisor.get_suggested_specs(criteria.category)
@@ -146,16 +223,43 @@ def run_interactive_session():
             finally:
                 provider.close()
 
-    # 5. Agregación, puntuación y filtrado
-    ranked_results = aggregator.filter_and_rank(raw_results, criteria)
+    # 5. Agregación, verificación de tipo de producto y filtrado
+    with console.status("[cyan]Verificando autenticidad de artículos y descartando componentes/accesorios...[/cyan]"):
+        ranked_results = aggregator.filter_and_rank(raw_results, criteria)
+
+    # Diagnóstico del Verificador en Punto 3
+    discard_summary = aggregator.get_discard_summary()
+    part_count = discard_summary.get(DiscardReason.COMPONENT_OR_SPARE_PART, 0)
+    acc_count = discard_summary.get(DiscardReason.ACCESSORY, 0)
+    cat_count = discard_summary.get(DiscardReason.CATEGORY_MISMATCH, 0)
+    brand_count = discard_summary.get(DiscardReason.BRAND_MISMATCH, 0)
+    total_parts = part_count + acc_count
+
+    console.print(f"  [bold green]✓[/bold green] [bold]Verificador de artículo:[/bold] [white]{len(raw_results)} candidatos analizados[/white] -> [bold green]{len(ranked_results)} unidades completas validadas[/bold green]")
+    if total_parts > 0 or cat_count > 0 or brand_count > 0:
+        details_str = []
+        if total_parts > 0:
+            details_str.append(f"{total_parts} ventiladores/soportes/repuestos")
+        if cat_count > 0:
+            details_str.append(f"{cat_count} no-IT/deportivos")
+        if brand_count > 0:
+            details_str.append(f"{brand_count} marcas ajenas")
+        console.print(f"    [dim]↳ Descartados por no ser el equipo completo: {', '.join(details_str)}[/dim]")
 
     # 6. Presentación de resultados
     console.print("\n[bold yellow]4. Resultados y Comparativa de Mercado:[/bold yellow]")
-    if not ranked_results:
-        if criteria.target_model:
+    if ranked_results:
+        target_name = criteria.product_type_label or criteria.clean_query
+        if criteria.target_brand and criteria.target_brand.lower() not in target_name.lower():
+            target_name = f"{target_name} ({criteria.target_brand})"
+        console.print(f"[dim]Mostrando exclusivamente unidades completas verificadas de: [bold white]{target_name}[/bold white][/dim]\n")
+    else:
+        if criteria.target_models or criteria.target_model:
             console.print("[yellow]Sin stock o sin coincidencias exactas para el modelo solicitado.[/yellow]")
         else:
             console.print("[yellow]Sin stock o sin coincidencias exactas que alcancen el umbral de afinidad requerido (mínimo 80%).[/yellow]")
+        # Diagnóstico y auditoría de descartes cuando no hay resultados
+        render_discard_diagnostics(aggregator, len(raw_results), max_items=30)
         return
 
     res_table = Table(show_header=True, header_style="bold magenta", expand=True)
@@ -196,6 +300,10 @@ def run_interactive_session():
     )
     console.print("\n", links_panel)
     console.print(f"\n[dim]Se han comparado {len(ranked_results)} ofertas con envío garantizado a España.[/dim]\n")
+
+    # Auditoría transparente de descartes al final del reporte
+    render_discard_diagnostics(aggregator, len(raw_results), max_items=20)
+
 
 
 from marketpulse.core.browser import BrowserSession

@@ -1,6 +1,6 @@
 import abc
 import time
-from typing import List, Optional
+from typing import Any, List, Optional, Tuple
 import httpx
 from marketpulse.config import DEFAULT_HEADERS, REQUEST_TIMEOUT_SECONDS
 from marketpulse.models import ProductResult, SearchCriteria
@@ -53,13 +53,33 @@ class BaseStoreProvider(abc.ABC):
         except Exception:
             return None
 
-    def get_browser_html(self, url: str, wait_timeout_ms: int = 2500, wait_until: str = "domcontentloaded") -> Optional[str]:
+    def get_browser_html(self, url: str, wait_timeout_ms: int = 2500, wait_until: str = "domcontentloaded", scroll_count: int = 0) -> Optional[str]:
         """
         Obtiene el HTML renderizado mediante navegador headless Playwright.
         Indispensable para tiendas con protección antibot o contenido generado por cliente JS.
         """
         from marketpulse.core.browser import BrowserSession
-        return BrowserSession.fetch_html(url, wait_timeout_ms=wait_timeout_ms, wait_until=wait_until)
+        return BrowserSession.fetch_html(url, wait_timeout_ms=wait_timeout_ms, wait_until=wait_until, scroll_count=scroll_count)
+
+    def get_browser_page_data(
+        self,
+        url: str,
+        wait_timeout_ms: int = 2500,
+        wait_until: str = "domcontentloaded",
+        scroll_count: int = 0,
+        eval_js: Optional[str] = None
+    ) -> Tuple[Optional[str], Optional[Any]]:
+        """
+        Obtiene el HTML renderizado y el resultado de evaluar JS mediante navegador headless Playwright.
+        """
+        from marketpulse.core.browser import BrowserSession
+        return BrowserSession.fetch_page_data(
+            url,
+            wait_timeout_ms=wait_timeout_ms,
+            wait_until=wait_until,
+            scroll_count=scroll_count,
+            eval_js=eval_js
+        )
 
     def close(self):
         """Cierra la sesión HTTP."""

@@ -20,8 +20,17 @@ def parse_price(raw_text: str) -> Optional[float]:
             if p_first is not None:
                 return p_first
 
-    # 1. Conservar solo dígitos, comas y puntos
-    cleaned = re.sub(r"[^\d.,]", "", raw_text.strip())
+    # Limpiar notas de descuento (ej. '-15% dto') y especificaciones en paréntesis (ej. '(2,72€/ud)')
+    text = re.sub(r"-\s*\d+%\s*(?:dto\.?)?", "", raw_text, flags=re.I)
+    text = re.sub(r"\([^\)]*\)", "", text)
+
+    # 1. Buscar el primer bloque monetario numérico
+    m_money = re.search(r"(?:€\s*)?(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{1,2})?|\d+(?:[.,]\d{1,2})?)\s*(?:€)?", text)
+    if m_money and m_money.group(1):
+        cleaned = m_money.group(1).strip()
+    else:
+        cleaned = re.sub(r"[^\d.,]", "", text.strip())
+
     if not cleaned:
         return None
 
@@ -37,17 +46,19 @@ def parse_price(raw_text: str) -> Optional[float]:
     # 3. Solo coma presente
     elif "," in cleaned:
         parts = cleaned.split(",")
-        if len(parts[-1]) == 2:  # Decimal (ej. 199,99)
+        if len(parts[-1]) in (1, 2):  # Decimal (ej. 199,99 o 524,5 o 187,2)
             cleaned = cleaned.replace(",", ".")
-        else:  # Miles sin decimales (ej. 1,000)
+        elif len(parts[-1]) == 3 and len(parts) > 1:  # Miles sin decimales (ej. 1,000)
             cleaned = cleaned.replace(",", "")
+        else:
+            cleaned = cleaned.replace(",", ".")
 
     # 4. Solo punto presente
     elif "." in cleaned:
         parts = cleaned.split(".")
         if len(parts[-1]) == 3 and len(parts) > 1:  # Miles (ej. 1.139)
             cleaned = cleaned.replace(".", "")
-        # Si tiene 2 dígitos (ej. 199.99), float() ya lo interpreta bien
+        # Si tiene 1 o 2 dígitos (ej. 199.99 o 199.9), float() ya lo interpreta bien
 
     try:
         return float(cleaned)

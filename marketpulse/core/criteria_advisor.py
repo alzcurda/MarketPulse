@@ -69,6 +69,50 @@ class CriteriaAdvisor:
         ]
     }
 
+    KNOWN_BRANDS: List[str] = [
+        "trigkey", "gmktec", "beelink", "minisforum", "geekom", "chuwi", "nippo", "acemagic", "bmax", "blackview",
+        "ouvis", "kamrui", "mllse", "soyo", "firebat", "genmachine", "topton", "mele", "chatreey", "morefine", "szbox",
+        "apple", "hp", "lenovo", "dell", "asus", "acer", "msi", "samsung", "xiaomi", "gigabyte",
+        "sony", "lg", "huawei", "toshiba", "motorola", "oppo", "realme", "google", "bose", "sennheiser"
+    ]
+
+    PRODUCT_TYPES = [
+        ("mini_pc", "Mini PC / Ordenador de sobremesa compacto", [r"\bmini\s*pc\b", r"\bminipc\b", r"\bbarebone\b", r"\bmicro\s*pc\b"]),
+        ("laptop", "Portátil / Laptop", [r"\bport[aá]til\b", r"\blaptop\b", r"\bnotebook\b", r"\bmacbook\b", r"\bultrabook\b"]),
+        ("desktop", "Ordenador de Sobremesa / Torre", [r"\bsobremesa\b", r"\btorre\s*pc\b", r"\bordenador\s*gaming\b", r"\bpc\s*gaming\b", r"\bordenador\s*de\s*sobremesa\b"]),
+        ("gpu", "Tarjeta Gráfica (GPU)", [r"\btarjeta\s*gr[aá]fica\b", r"\bgr[aá]fica\b", r"\bgpu\b", r"\brtx\s*\d{4}\b", r"\brx\s*\d{4}\b"]),
+        ("cpu", "Procesador (CPU)", [r"\bprocesador\b", r"\bcpu\b", r"\bryzen\s*\d\b", r"\bintel\s*core\b"]),
+        ("ram", "Memoria RAM", [r"\bmemoria\s*ram\b", r"\bddr[45]\b"]),
+        ("storage", "Disco Duro / SSD", [r"\bdisco\s*duro\b", r"\bssd\b", r"\bnvme\b", r"\bm\.2\b"]),
+        ("monitor", "Monitor / Pantalla", [r"\bmonitor\b", r"\bpantalla\b", r"\bdisplay\b"]),
+        ("smartphone", "Teléfono Móvil / Smartphone", [r"\bsmartphone\b", r"\bm[oó]vil\b", r"\btel[eé]fono\b", r"\biphone\b"]),
+        ("audio", "Auriculares / Dispositivo de Audio", [r"\bauriculares\b", r"\baltavoz\b", r"\baltavoces\b", r"\bheadphones\b", r"\bsoundbar\b"]),
+    ]
+
+    def detect_brand(self, text: str) -> Optional[str]:
+        """Detecta marcas comerciales reconocidas en la petición."""
+        text_lower = text.lower()
+        for brand in self.KNOWN_BRANDS:
+            if re.search(rf"\b{re.escape(brand)}\b", text_lower):
+                return brand.title()
+        return None
+
+    def detect_product_type(self, text: str, category: ProductCategory) -> Tuple[str, str]:
+        """Detecta la tipología específica de artículo buscado y su etiqueta legible."""
+        text_lower = text.lower()
+        for p_type, label, patterns in self.PRODUCT_TYPES:
+            if any(re.search(pat, text_lower) for pat in patterns):
+                return p_type, label
+        if category == ProductCategory.LAPTOPS:
+            return "laptop", "Portátil / Laptop"
+        elif category == ProductCategory.MONITORS:
+            return "monitor", "Monitor / Pantalla"
+        elif category == ProductCategory.SMARTPHONES:
+            return "smartphone", "Teléfono Móvil / Smartphone"
+        elif category == ProductCategory.AUDIO:
+            return "audio", "Auriculares / Dispositivo de Audio"
+        return "tecnologia_general", "Dispositivo tecnológico"
+
     def detect_category(self, text: str) -> ProductCategory:
         """Identifica la categoría más probable a partir del texto."""
         text_lower = text.lower()
@@ -232,10 +276,11 @@ class CriteriaAdvisor:
 
         return sorted(list(variants))
 
-    def extract_target_model(self, text: str) -> Tuple[Optional[str], List[str]]:
+    def extract_target_models(self, text: str) -> Tuple[Optional[str], List[str], List[str]]:
         """
-        Detecta identificadores o códigos de modelo específicos solicitados por el usuario
-        (ej: EQi12, S12 Pro, NucBox G3, MP100 Pro, SER5, Cubi 5) y genera sus variantes normalizadas.
+        Detecta uno o varios modelos específicos solicitados por el usuario
+        (ej: NucBox G3, G5, M5 o M6; Beelink SER5 o S12 Pro) y genera todas sus variantes.
+        Devuelve: (modelo_principal, lista_modelos, lista_variantes)
         """
         exclusion_split = re.split(
             r"\b(?:descartando|excluyendo|evitando|sin\s+(?:procesador|equipos?|marcas?|amd|celeron)|no\s+quiero|nada\s+de)\b",
@@ -249,9 +294,51 @@ class CriteriaAdvisor:
             "16gb", "32gb", "64gb", "8gb", "4gb", "12gb", "512gb", "256gb", "128gb", "1tb", "2tb",
             "windows", "win11", "win10", "ddr4", "ddr5", "wifi", "bluetooth", "hdmi", "usb",
             "intel", "amd", "ryzen", "core", "celeron", "pentium", "geforce", "radeon",
-            "portatil", "laptop", "sobremesa", "ordenador", "pc", "mini", "minipc", "desktop"
+            "portatil", "laptop", "sobremesa", "ordenador", "pc", "mini", "minipc", "desktop",
+            "modelos", "modelo"
         }
 
+        # Detectar marca si está presente
+        brand = self.detect_brand(text_positive)
+        brand_norm = brand.lower() if brand else None
+
+        target_models: List[str] = []
+
+        # 1. Detectar listas de series (ej: "Green G4", "Speed S5", "NucBox G3, G5, M5 o M6", "SER5", etc.)
+        series_match = re.search(
+            r"\b(Green|Speed|NucBox|Mini\s*S|EQi|EQ|SER|SEi|MP|Cubi|ProDesk|EliteDesk|ThinkCentre)\s+([A-Za-z0-9\s,oy]+)",
+            text_positive,
+            re.I
+        )
+        canonical_series = {
+            "green": "Green",
+            "speed": "Speed",
+            "nucbox": "NucBox",
+            "mini s": "Mini S",
+            "eqi": "EQi",
+            "eq": "EQ",
+            "ser": "SER",
+            "sei": "SEi",
+            "mp": "MP",
+            "cubi": "Cubi",
+            "prodesk": "ProDesk",
+            "elitedesk": "EliteDesk",
+            "thinkcentre": "ThinkCentre",
+        }
+        if series_match:
+            prefix_raw = series_match.group(1).strip()
+            prefix = canonical_series.get(prefix_raw.lower(), prefix_raw)
+            tail = series_match.group(2)
+            # Extraer tokens de submodelos (ej: G3, G5, M5, M6 o G4)
+            tokens = re.split(r"[\s,]+(?:o|y)?[\s,]*", tail)
+            for t in tokens:
+                t_clean = t.strip()
+                if re.match(r"^[A-Za-z0-9]{2,6}$", t_clean) and t_clean.lower() not in known_non_models and t_clean.lower() not in {"con", "para", "de", "en", "por", "que", "los"}:
+                    full_name = f"{prefix} {t_clean.upper()}"
+                    if full_name not in target_models:
+                        target_models.append(full_name)
+
+        # 2. Patrones individuales de modelos
         model_patterns = [
             r"\b(NucBox\s*[A-Z0-9]+)\b",
             r"\b(Mini\s*S(?:12)?(?:\s*Pro)?)\b",
@@ -272,13 +359,55 @@ class CriteriaAdvisor:
                     continue
                 if re.match(r"^(?:n\d{2,3}|16gb|512gb|1tb)$", norm_check):
                     continue
+                # Si el código es muy corto (<= 2 caracteres, ej: G4), solo se admite ligado a la marca
                 if len(norm_check) < 3:
-                    continue
+                    if brand:
+                        raw_model = f"{brand} {raw_model.upper()}"
+                    else:
+                        continue
 
-                variants = self.generate_model_variants(raw_model)
-                return raw_model, variants
+                if not any(raw_model.lower() == tm.lower() or raw_model.lower() in tm.lower() for tm in target_models):
+                    target_models.append(raw_model)
 
-        return None, []
+        if not target_models:
+            return None, [], []
+
+        primary_model = target_models[0]
+        all_variants: set = set()
+
+        for tm in target_models:
+            variants = self.generate_model_variants(tm)
+            all_variants.update(variants)
+
+            parts = tm.split()
+            if len(parts) >= 2:
+                prefix = parts[0].lower()
+                suffix = parts[-1].lower() # Ej: g4
+                # NUNCA añadir suffix solo si es <= 3 caracteres para evitar falsos positivos
+                if len(suffix) >= 4:
+                    all_variants.add(suffix)
+                    all_variants.add(f"{suffix} pro")
+                    all_variants.add(f"{suffix}s")
+                all_variants.add(f"{prefix} {suffix}")
+                all_variants.add(f"{prefix}-{suffix}")
+                all_variants.add(f"{prefix}{suffix}")
+                if brand_norm:
+                    all_variants.add(f"{brand_norm} {suffix}")
+                    all_variants.add(f"{brand_norm}-{suffix}")
+                    all_variants.add(f"{brand_norm}{suffix}")
+                    all_variants.add(f"{brand_norm} {suffix} pro")
+                    all_variants.add(f"{brand_norm} {tm.lower()}")
+                    all_variants.add(f"{brand_norm} {prefix}")
+
+        return primary_model, target_models, sorted(list(all_variants))
+
+    def extract_target_model(self, text: str) -> Tuple[Optional[str], List[str]]:
+        """
+        Detecta identificadores o códigos de modelo específicos solicitados por el usuario
+        (ej: EQi12, S12 Pro, NucBox G3, MP100 Pro, SER5, Cubi 5) y genera sus variantes normalizadas.
+        """
+        primary, _, variants = self.extract_target_models(text)
+        return primary, variants
 
     def extract_hardware_limits(self, text: str) -> Tuple[Optional[int], Optional[int]]:
         """Extrae requisitos mínimos de RAM (GB) y almacenamiento SSD (GB)."""
@@ -394,26 +523,57 @@ class CriteriaAdvisor:
         allowed_cpus: List[str],
         min_ram_gb: Optional[int],
         min_storage_gb: Optional[int],
-        target_model: Optional[str] = None
+        target_model: Optional[str] = None,
+        target_models: Optional[List[str]] = None,
+        target_brand: Optional[str] = None,
     ) -> List[str]:
         """
         Construye consultas segmentadas de alta precisión para los buscadores de las tiendas.
+        Preserva la marca objetivo y garantiza que la consulta original no se pierda.
         """
         base_product = "mini pc" if "mini pc" in clean_query.lower() else clean_query.split()[0]
         ram_str = f"{min_ram_gb}gb" if min_ram_gb else ""
         storage_str = f"{min_storage_gb}gb" if min_storage_gb else ""
+        brand_clean = target_brand.lower().strip() if target_brand else ""
 
         queries = []
-        if target_model:
-            model_clean = target_model.lower()
-            queries.append(f"{base_product} {model_clean}")
-            if ram_str:
-                queries.append(f"{base_product} {model_clean} {ram_str}")
-            queries.append(model_clean)
 
+        # 1. Consulta limpia completa como prioridad máxima
+        if clean_query and clean_query not in queries:
+            queries.append(clean_query)
+
+        # 2. Consultas combinadas con modelo y marca
+        models_to_query = target_models or ([target_model] if target_model else [])
+        for tm in models_to_query[:5]:
+            model_clean = tm.lower()
+            if brand_clean and brand_clean not in model_clean:
+                q_brand_model = f"{brand_clean} {model_clean}"
+                if q_brand_model not in queries:
+                    queries.append(q_brand_model)
+                q_brand_model_pc = f"{brand_clean} {model_clean} {base_product}"
+                if q_brand_model_pc not in queries:
+                    queries.append(q_brand_model_pc)
+
+            q_base = f"{base_product} {model_clean}"
+            if q_base not in queries:
+                queries.append(q_base)
+
+            if ram_str:
+                q_ram = f"{brand_clean} {model_clean} {ram_str}".strip() if brand_clean else f"{base_product} {model_clean} {ram_str}"
+                if q_ram not in queries:
+                    queries.append(q_ram)
+
+            # Solo añadir la subquery de modelo suelto si no es un código corto genérico (<= 3 caracteres)
+            if len(model_clean) > 3 and model_clean not in queries and not (len(model_clean.split()) == 1 and len(model_clean) <= 4):
+                queries.append(model_clean)
+
+        # 3. Consultas dirigidas por procesador
         if allowed_cpus:
             for cpu in allowed_cpus[:6]:
-                q_parts = [base_product, cpu.lower()]
+                q_parts = []
+                if brand_clean:
+                    q_parts.append(brand_clean)
+                q_parts.extend([base_product, cpu.lower()])
                 if ram_str:
                     q_parts.append(ram_str)
                 if storage_str and min_storage_gb and min_storage_gb >= 512:
@@ -435,6 +595,9 @@ class CriteriaAdvisor:
         negative_text = " ".join(parts[1:]) if len(parts) > 1 else ""
 
         category = self.detect_category(positive_text)
+        product_type, product_type_label = self.detect_product_type(positive_text, category)
+        target_brand = self.detect_brand(positive_text)
+
         min_price, max_price = self.extract_budget(prompt)
         max_price_by_cpu = self.extract_conditional_prices(prompt)
 
@@ -442,8 +605,9 @@ class CriteriaAdvisor:
         if max_price_by_cpu and (max_price is None or max(max_price_by_cpu.values()) > max_price):
             max_price = max(max_price_by_cpu.values())
 
-        # Extraer modelo específico si el usuario lo solicita
-        target_model, target_model_variants = self.extract_target_model(positive_text)
+        # Extraer modelo(s) específico(s) si el usuario lo solicita
+        target_model, target_models, target_model_variants = self.extract_target_models(positive_text)
+        target_series = target_models[0] if target_models else None
 
         # Extraer CPUs permitidas y límites de hardware
         allowed_cpus = self.extract_allowed_cpus(positive_text)
@@ -460,13 +624,24 @@ class CriteriaAdvisor:
 
         # Consultas dirigidas segmentadas
         target_queries = self.build_targeted_queries(
-            clean_query, allowed_cpus, min_ram_gb, min_storage_gb, target_model=target_model
+            clean_query,
+            allowed_cpus,
+            min_ram_gb,
+            min_storage_gb,
+            target_model=target_model,
+            target_models=target_models,
+            target_brand=target_brand,
         )
 
         return SearchCriteria(
             raw_query=prompt,
             clean_query=clean_query,
             category=category,
+            product_type=product_type,
+            product_type_label=product_type_label,
+            target_brand=target_brand,
+            target_series=target_series,
+            min_system_price=35.0,
             min_price=min_price,
             max_price=max_price,
             key_specs=key_specs,
@@ -478,6 +653,7 @@ class CriteriaAdvisor:
             max_price_by_cpu=max_price_by_cpu,
             target_search_queries=target_queries,
             target_model=target_model,
+            target_models=target_models,
             target_model_variants=target_model_variants,
             min_score_threshold=80.0,
             ships_from_spain_only=True,

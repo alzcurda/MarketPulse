@@ -37,6 +37,27 @@ class StoreRouter:
             "estimated_delivery_days": "3 - 5 días hábiles",
             "trust_score": 8.2,
             "strengths": [ProductCategory.AUDIO, ProductCategory.GENERAL_TECH, ProductCategory.GAMING, ProductCategory.PC_COMPONENTS],
+        },
+        "wallapop": {
+            "name": "Wallapop (Segunda Mano)",
+            "shipping_info": "Envíos protegidos a toda España (Correos/SEUR)",
+            "estimated_delivery_days": "48 - 72 horas",
+            "trust_score": 8.5,
+            "strengths": [ProductCategory.PC_COMPONENTS, ProductCategory.LAPTOPS, ProductCategory.SMARTPHONES, ProductCategory.MONITORS, ProductCategory.GAMING, ProductCategory.AUDIO, ProductCategory.GENERAL_TECH],
+        },
+        "cex_es": {
+            "name": "CeX Webuy (Segunda Mano)",
+            "shipping_info": "Envío peninsular y Baleares con 5 años de garantía oficial",
+            "estimated_delivery_days": "48 - 72 horas",
+            "trust_score": 9.0,
+            "strengths": [ProductCategory.PC_COMPONENTS, ProductCategory.LAPTOPS, ProductCategory.GAMING, ProductCategory.SMARTPHONES, ProductCategory.MONITORS],
+        },
+        "backmarket_es": {
+            "name": "Back Market (Reacondicionado)",
+            "shipping_info": "Envío a domicilio en España con 2 años de garantía y 30 días de prueba",
+            "estimated_delivery_days": "24 - 48 horas",
+            "trust_score": 9.2,
+            "strengths": [ProductCategory.LAPTOPS, ProductCategory.PC_COMPONENTS, ProductCategory.SMARTPHONES, ProductCategory.AUDIO, ProductCategory.GENERAL_TECH],
         }
     }
 
@@ -82,6 +103,36 @@ class StoreRouter:
                 else:
                     reason = "Opción para comparar ofertas alternativas con envío local."
                     priority = 4
+                    enabled = False
+
+            elif store_id == "wallapop":
+                if is_specialized:
+                    reason = "Líder de segunda mano en España. Ideal para chollos y Mini PCs descatalogados con Wallapop Envíos."
+                    priority = 3
+                    enabled = True
+                else:
+                    reason = "Mercado de segunda mano entre particulares con envío a toda España."
+                    priority = 4
+                    enabled = False
+
+            elif store_id == "cex_es":
+                if is_specialized:
+                    reason = "Cadena especializada en segunda mano con 5 años de garantía oficial y hardware revisado."
+                    priority = 3
+                    enabled = True
+                else:
+                    reason = "Segunda mano verificada con garantía nacional de 5 años."
+                    priority = 4
+                    enabled = False
+
+            elif store_id == "backmarket_es":
+                if is_specialized:
+                    reason = "Líder europeo en tecnología reacondicionada profesional con 2 años de garantía oficial y 30 días de prueba."
+                    priority = 2
+                    enabled = True
+                else:
+                    reason = "Plataforma de electrónica reacondicionada con garantía europea."
+                    priority = 3
                     enabled = False
 
             recommendations.append(

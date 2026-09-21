@@ -1,5 +1,5 @@
 import logging
-from typing import Optional
+from typing import Any, Optional, Tuple
 from playwright.sync_api import Browser, BrowserContext, Playwright, sync_playwright
 
 logger = logging.getLogger(__name__)
@@ -58,23 +58,66 @@ class BrowserSession:
         return cls._context
 
     @classmethod
-    def fetch_html(cls, url: str, wait_timeout_ms: int = 2500, wait_until: str = "domcontentloaded") -> Optional[str]:
+    def fetch_page_data(
+        cls,
+        url: str,
+        wait_timeout_ms: int = 2500,
+        wait_until: str = "domcontentloaded",
+        scroll_count: int = 0,
+        scroll_delay_ms: int = 800,
+        eval_js: Optional[str] = None,
+    ) -> Tuple[Optional[str], Optional[any]]:
         """
-        Navega a una URL y obtiene el HTML procesado en el DOM tras la ejecución de JS.
+        Navega a una URL con Playwright, opcionalmente realiza scroll y evalúa expresiones JS en la página.
+        Devuelve una tupla (html_content, eval_result).
         """
         try:
             context = cls.get_context()
             page = context.new_page()
             try:
-                page.goto(url, wait_until=wait_until, timeout=20000)
+                page.goto(url, wait_until=wait_until, timeout=25000)
                 if wait_timeout_ms > 0:
                     page.wait_for_timeout(wait_timeout_ms)
-                return page.content()
+
+                if scroll_count > 0:
+                    for _ in range(scroll_count):
+                        page.mouse.wheel(0, 1500)
+                        if scroll_delay_ms > 0:
+                            page.wait_for_timeout(scroll_delay_ms)
+
+                eval_result = None
+                if eval_js:
+                    try:
+                        eval_result = page.evaluate(eval_js)
+                    except Exception as e_eval:
+                        logger.debug(f"Error evaluando JS en {url}: {e_eval}")
+
+                html_content = page.content()
+                return html_content, eval_result
             finally:
                 page.close()
         except Exception as e:
             logger.debug(f"Error al navegar a {url}: {e}")
-            return None
+            return None, None
+
+    @classmethod
+    def fetch_html(
+        cls,
+        url: str,
+        wait_timeout_ms: int = 2500,
+        wait_until: str = "domcontentloaded",
+        scroll_count: int = 0,
+    ) -> Optional[str]:
+        """
+        Navega a una URL y obtiene el HTML procesado en el DOM tras la ejecución de JS.
+        """
+        html, _ = cls.fetch_page_data(
+            url,
+            wait_timeout_ms=wait_timeout_ms,
+            wait_until=wait_until,
+            scroll_count=scroll_count,
+        )
+        return html
 
     @classmethod
     def close(cls):
