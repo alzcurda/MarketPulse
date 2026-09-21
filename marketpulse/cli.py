@@ -123,7 +123,12 @@ def run_interactive_session():
     with console.status("[cyan]Analizando especificaciones y categoría...[/cyan]"):
         criteria: SearchCriteria = advisor.analyze_user_prompt(user_prompt)
 
-    console.print(f"\n[bold green]✓ Categoría detectada:[/bold green] [cyan]{criteria.category.value.upper()}[/cyan]")
+    engine_name = criteria.analysis_engine or "Reglas Locales Heurísticas (Modo sin IA)"
+    console.print(f"\n[bold green]✓ Motor semántico utilizado:[/bold green] [bold magenta]{engine_name}[/bold magenta]")
+    if "sin IA" in engine_name or "Reglas Locales" in engine_name:
+        console.print("[dim]  (💡 Nota: Operando en modo local por reglas. Para IA universal, configura Ollama o tu API key en .env)[/dim]")
+
+    console.print(f"[bold green]✓ Categoría detectada:[/bold green] [cyan]{criteria.category.value.upper()}[/cyan]")
     if criteria.product_type_label:
         console.print(f"[bold green]✓ Tipo de artículo:[/bold green] [bold cyan]{criteria.product_type_label}[/bold cyan]")
     if criteria.target_brand:

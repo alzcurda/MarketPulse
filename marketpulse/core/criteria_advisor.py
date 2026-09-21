@@ -609,6 +609,19 @@ class CriteriaAdvisor:
         target_models = [target_model] if target_model else []
         target_model_variants = self.generate_model_variants(target_model) if target_model else []
 
+        # Enriquecer con detección precisa de modelos múltiples si están presentes en el prompt
+        rule_primary, rule_models, rule_variants = self.extract_target_models(prompt)
+        if rule_models:
+            # Si el modelo devuelto por el LLM era una lista en texto ("G3, G5, M5"), reemplazar con lista limpia
+            if any("," in tm for tm in target_models) or not target_models:
+                target_models = rule_models
+                target_model = rule_primary
+            else:
+                for rm in rule_models:
+                    if rm not in target_models:
+                        target_models.append(rm)
+            target_model_variants = sorted(list(set(target_model_variants + rule_variants)))
+
         clean_query = data.get("clean_query") or self.clean_search_query(prompt, category)
 
         # Precios
@@ -644,6 +657,30 @@ class CriteriaAdvisor:
                     )
                 )
 
+        # Si es un equipo informático y faltan especificaciones de hardware, garantizar que se pregunte
+        if product_type in ["mini_pc", "laptop", "desktop"] and not min_ram_gb and not min_storage_gb:
+            is_generic = True
+            # Asegurar que se pregunte por CPU si el LLM no lo incluyó
+            if not any("cpu" in a.key.lower() or "procesador" in a.key.lower() for a in refinement_aspects):
+                insert_idx = 1 if refinement_aspects and refinement_aspects[0].key == "barebone" else 0
+                refinement_aspects.insert(
+                    insert_idx,
+                    RefinementAspect(
+                        key="cpu",
+                        question="Preferencia de procesador / arquitectura",
+                        options=[
+                            "AMD Ryzen (Ryzen 5 / Ryzen 7)",
+                            "Intel (Alder Lake N100 / Core i3 / Core i5)",
+                            "Gama Alta (Ryzen 7 / Core i7 o superior)",
+                            "Cualquiera / Sin preferencia",
+                        ],
+                        recommended_option="Cualquiera / Sin preferencia",
+                    )
+                )
+
+        if refinement_aspects and (not min_ram_gb or not min_storage_gb):
+            is_generic = True
+
         target_queries = self.build_targeted_queries(
             clean_query,
             allowed_cpus,
@@ -653,6 +690,8 @@ class CriteriaAdvisor:
             target_models=target_models,
             target_brand=target_brand,
         )
+
+        _, backend_label = LLMClient.get_backend_info()
 
         return SearchCriteria(
             raw_query=prompt,
@@ -681,6 +720,7 @@ class CriteriaAdvisor:
             in_stock_only=True,
             is_generic=is_generic,
             refinement_aspects=refinement_aspects,
+            analysis_engine=backend_label,
         )
 
     def _build_criteria_from_rules(self, prompt: str) -> SearchCriteria:
@@ -735,6 +775,17 @@ class CriteriaAdvisor:
                     recommended_option="Solo equipos completos listos para usar",
                 ),
                 RefinementAspect(
+                    key="cpu",
+                    question="Preferencia de procesador / arquitectura",
+                    options=[
+                        "AMD Ryzen (Ryzen 5 / Ryzen 7)",
+                        "Intel (Alder Lake N100 / Core i3 / Core i5)",
+                        "Gama Alta (Ryzen 7 / Core i7 o superior)",
+                        "Cualquiera / Sin preferencia",
+                    ],
+                    recommended_option="Cualquiera / Sin preferencia",
+                ),
+                RefinementAspect(
                     key="ram",
                     question="Memoria RAM mínima deseada",
                     options=["16 GB (Recomendado)", "32 GB", "8 GB", "Cualquiera / Sin mínimo"],
@@ -775,6 +826,7 @@ class CriteriaAdvisor:
             in_stock_only=True,
             is_generic=is_generic,
             refinement_aspects=refinement_aspects,
+            analysis_engine="Reglas Locales Heurísticas (Modo sin IA)",
         )
 
     def analyze_user_prompt(self, prompt: str) -> SearchCriteria:
@@ -804,14 +856,16 @@ class CriteriaAdvisor:
             if text_lower.startswith("cualquiera") or "indiferente" in text_lower or "me da igual" in text_lower or "sin minimo" in text_lower:
                 continue
 
+            k_lower = key.lower()
+
             # 1. Parámetro RAM
-            if key == "ram":
+            if "ram" in k_lower or "memoria" in k_lower:
                 m = re.search(r"(\d+)\s*GB", chosen_text, re.I)
                 if m:
                     criteria.min_ram_gb = int(m.group(1))
 
             # 2. Parámetro Almacenamiento SSD
-            elif key in ["storage", "almacenamiento", "ssd"]:
+            elif any(s in k_lower for s in ["storage", "almacenamiento", "ssd", "disco"]):
                 m = re.search(r"(\d+)\s*(GB|TB)", chosen_text, re.I)
                 if m:
                     val = int(m.group(1))
@@ -819,16 +873,37 @@ class CriteriaAdvisor:
                         val *= 1024
                     criteria.min_storage_gb = val
 
-            # 3. Parámetro Barebone
-            elif key == "barebone":
-                if "completos" in text_lower:
+            # 3. Parámetro Procesador / CPU
+            elif any(s in k_lower for s in ["cpu", "procesador", "architecture", "arquitectura"]):
+                if "amd" in text_lower or "ryzen" in text_lower:
+                    criteria.allowed_cpus = ["Ryzen"]
+                    if "Ryzen" not in criteria.key_specs:
+                        criteria.key_specs.append("Ryzen")
+                elif "intel" in text_lower:
+                    criteria.allowed_cpus = ["Intel", "Core", "N100", "N95", "i3", "i5", "i7"]
+                    if "Intel" not in criteria.key_specs:
+                        criteria.key_specs.append("Intel")
+                elif "gama alta" in text_lower:
+                    criteria.allowed_cpus = ["Ryzen 7", "Ryzen 9", "i7", "i9", "Core Ultra"]
+                    if "Gama Alta" not in criteria.key_specs:
+                        criteria.key_specs.append("Gama Alta")
+                else:
+                    clean_choice = re.sub(r"\(.*?\)", "", chosen_text).strip()
+                    if clean_choice:
+                        criteria.allowed_cpus = [clean_choice]
+                        if clean_choice not in criteria.key_specs:
+                            criteria.key_specs.append(clean_choice)
+
+            # 4. Parámetro Barebone
+            elif "barebone" in k_lower:
+                if "completos" in text_lower or text_lower.startswith("no") or "sin barebone" in text_lower:
                     if "barebone" not in criteria.exclude_keywords:
                         criteria.exclude_keywords.append("barebone")
-                elif "solo barebone" in text_lower:
+                elif "solo barebone" in text_lower or text_lower.startswith("s") or "si" in text_lower:
                     if "barebone" not in criteria.must_have_keywords:
                         criteria.must_have_keywords.append("barebone")
 
-            # 4. Parámetros universales de cualquier producto (ej: café, presión, potencia, motor)
+            # 5. Parámetros universales de cualquier producto (ej: café, presión, potencia, motor)
             else:
                 clean_choice = re.sub(r"\(.*?\)", "", chosen_text).strip()
                 if clean_choice and clean_choice not in criteria.key_specs:
@@ -837,8 +912,8 @@ class CriteriaAdvisor:
                     if refined_q not in criteria.target_search_queries:
                         criteria.target_search_queries.insert(1, refined_q)
 
-        # Regenerar consultas dirigidas si se especificó RAM o disco
-        if criteria.min_ram_gb or criteria.min_storage_gb:
+        # Regenerar consultas dirigidas si se especificó CPU, RAM o disco
+        if criteria.min_ram_gb or criteria.min_storage_gb or criteria.allowed_cpus:
             criteria.target_search_queries = self.build_targeted_queries(
                 criteria.clean_query,
                 criteria.allowed_cpus,

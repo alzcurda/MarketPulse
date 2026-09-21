@@ -34,8 +34,8 @@ Debes responder EXCLUSIVAMENTE con un objeto JSON válido con la siguiente estru
 }
 
 REGLAS OBLIGATORIAS:
-1. 'refinement_aspects' debe contener entre 2 y 4 aspectos técnicos que varíen sustancialmente el precio o la experiencia de ese producto. Si is_generic es false, puede ser una lista vacía.
-2. Si el producto es un ordenador o Mini PC genérico, incluye preguntas sobre RAM (8GB, 16GB, 32GB), SSD (256GB, 512GB, 1TB) y si acepta Barebone.
+1. 'refinement_aspects' debe contener entre 2 y 4 aspectos técnicos que varíen sustancialmente el precio o la configuración de ese producto.
+2. Si el producto es un ordenador, portátil o Mini PC (incluso con marca o modelo como 'GMKtec G10') y el usuario NO especificó RAM ni disco ni CPU: marca 'is_generic': true e incluye preguntas obligatorias sobre: procesador/arquitectura (AMD Ryzen vs Intel), memoria RAM (16GB, 32GB), SSD (512GB, 1TB) y si acepta Barebone (sin RAM ni disco).
 3. No añadas texto explicativo ni bloques markdown fuera del JSON. Devuelve únicamente el JSON.
 """
 
@@ -223,11 +223,18 @@ class LLMClient:
 
     @classmethod
     def _call_gemini(cls, prompt: str) -> Optional[Dict[str, Any]]:
-        """Llamada directa y ligera a la API de Google Gemini en modo JSON."""
+        """Llamada directa y ligera a la API de Google Gemini en modo JSON con auto-fallback de versión."""
         api_key = config.GEMINI_API_KEY
         if not api_key:
             return None
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{config.GEMINI_MODEL}:generateContent?key={api_key}"
+
+        # Probar primero el modelo configurado y, si da 404/400 (desfasado o no disponible), usar las versiones más modernas
+        configured_model = config.GEMINI_MODEL
+        candidates_to_try = [configured_model]
+        for fallback_model in ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]:
+            if fallback_model not in candidates_to_try:
+                candidates_to_try.append(fallback_model)
+
         payload = {
             "contents": [
                 {
@@ -241,18 +248,26 @@ class LLMClient:
             },
         }
         headers = {"Content-Type": "application/json"}
+
         with httpx.Client(timeout=10.0) as client:
-            resp = client.post(url, json=payload, headers=headers)
-            if resp.status_code == 200:
-                data = resp.json()
-                candidates = data.get("candidates", [])
-                if candidates:
-                    parts = candidates[0].get("content", {}).get("parts", [])
-                    if parts:
-                        raw_text = parts[0].get("text", "")
-                        return cls._clean_json_response(raw_text)
-            else:
-                logger.debug(f"Error Gemini API ({resp.status_code}): {resp.text}")
+            for model_name in candidates_to_try:
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
+                resp = client.post(url, json=payload, headers=headers)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    candidates = data.get("candidates", [])
+                    if candidates:
+                        parts = candidates[0].get("content", {}).get("parts", [])
+                        if parts:
+                            raw_text = parts[0].get("text", "")
+                            return cls._clean_json_response(raw_text)
+                elif resp.status_code in (404, 400):
+                    logger.warning(f"Modelo Gemini '{model_name}' no disponible ({resp.status_code}). Probando siguiente versión compatible...")
+                    continue
+                else:
+                    logger.debug(f"Error Gemini API ({resp.status_code}): {resp.text}")
+                    break
+
         return None
 
     @classmethod

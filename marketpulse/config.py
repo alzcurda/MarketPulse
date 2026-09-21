@@ -2,8 +2,10 @@ import os
 from typing import Dict
 from dotenv import load_dotenv
 
-# Cargar variables desde archivo .env local si existe
-load_dotenv()
+# Cargar variables desde archivo .env local o 'env' sin punto (soporte para Windows)
+for _env_path in [".env", "env"]:
+    if os.path.exists(_env_path):
+        load_dotenv(dotenv_path=_env_path)
 
 # Configuración general
 APP_NAME = "MarketPulse"
@@ -48,7 +50,7 @@ OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.2")
 
 # 2. Parámetros Google Gemini (Nube / Gratis en Google AI Studio)
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 
 # 3. Parámetros OpenAI / LM Studio / Compatible
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")

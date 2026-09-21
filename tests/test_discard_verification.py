@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 from marketpulse.core.aggregator import Aggregator
 from marketpulse.core.criteria_advisor import CriteriaAdvisor
 from marketpulse.models import DiscardReason, ProductCategory, ProductResult, SearchCriteria
@@ -9,6 +10,11 @@ class TestDiscardVerification(unittest.TestCase):
     def setUp(self):
         self.aggregator = Aggregator()
         self.advisor = CriteriaAdvisor()
+        self.patcher = patch("marketpulse.core.llm_client.LLMClient.analyze_query", return_value=None)
+        self.patcher.start()
+
+    def tearDown(self):
+        self.patcher.stop()
 
     def test_multi_model_extraction(self):
         prompt = "Mini PC GMKtec, modelos NucBox G3, G5, M5 o M6."

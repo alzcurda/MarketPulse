@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 from marketpulse.core.criteria_advisor import CriteriaAdvisor
 from marketpulse.models import ProductCategory
 
@@ -7,6 +8,11 @@ class TestCriteriaAdvisor(unittest.TestCase):
 
     def setUp(self):
         self.advisor = CriteriaAdvisor()
+        self.patcher = patch("marketpulse.core.llm_client.LLMClient.analyze_query", return_value=None)
+        self.patcher.start()
+
+    def tearDown(self):
+        self.patcher.stop()
 
     def test_detect_category_laptops(self):
         prompt = "Quiero un portátil para programar con buena batería"
@@ -95,6 +101,39 @@ class TestCriteriaAdvisor(unittest.TestCase):
 
         # Las consultas dirigidas deben contener el modelo objetivo
         self.assertTrue(any("eqi12" in q for q in criteria.target_search_queries))
+
+
+    def test_generic_mini_pc_includes_cpu_and_engine(self):
+        prompt = "gmktec g10 mini pc"
+        criteria = self.advisor.analyze_user_prompt(prompt)
+
+        self.assertTrue(criteria.is_generic)
+        self.assertIsNotNone(criteria.analysis_engine)
+        aspect_keys = [a.key.lower() for a in criteria.refinement_aspects]
+        self.assertTrue(any("barebone" in k for k in aspect_keys))
+        self.assertTrue(any("cpu" in k or "procesador" in k for k in aspect_keys))
+        self.assertTrue(any("ram" in k for k in aspect_keys))
+        self.assertTrue(any("storage" in k or "ssd" in k or "disco" in k for k in aspect_keys))
+
+    def test_refine_criteria_cpu_and_hardware(self):
+        prompt = "gmktec g10 mini pc"
+        criteria = self.advisor.analyze_user_prompt(prompt)
+
+        refined = self.advisor.refine_criteria(
+            criteria,
+            {
+                "barebone": "Solo equipos completos listos para usar",
+                "cpu": "AMD Ryzen (Ryzen 5 / Ryzen 7)",
+                "ram": "16 GB (Recomendado)",
+                "storage": "512 GB SSD (Recomendado)",
+            }
+        )
+
+        self.assertEqual(refined.min_ram_gb, 16)
+        self.assertEqual(refined.min_storage_gb, 512)
+        self.assertIn("Ryzen", refined.allowed_cpus)
+        self.assertIn("barebone", refined.exclude_keywords)
+        self.assertTrue(any("ryzen" in q.lower() for q in refined.target_search_queries))
 
 
 if __name__ == "__main__":

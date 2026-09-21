@@ -76,6 +76,7 @@ class SearchCriteria(BaseModel):
     sort_by: str = Field(default="relevance", description="Criterio de ordenación: relevance, price_asc, price_desc")
     is_generic: bool = Field(default=False, description="Indica si la búsqueda representa un concepto amplio con múltiples configuraciones")
     refinement_aspects: List[RefinementAspect] = Field(default_factory=list, description="Preguntas dinámicas de afinado sugeridas por el asesor")
+    analysis_engine: Optional[str] = Field(default=None, description="Motor semántico utilizado para el análisis (Ollama, Gemini, Reglas Locales, etc.)")
 
 
 class ProductResult(BaseModel):

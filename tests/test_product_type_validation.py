@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 from marketpulse.core.aggregator import Aggregator
 from marketpulse.core.criteria_advisor import CriteriaAdvisor
 from marketpulse.models import DiscardReason, ProductCategory, ProductResult, SearchCriteria
@@ -9,6 +10,11 @@ class TestProductTypeValidation(unittest.TestCase):
     def setUp(self):
         self.advisor = CriteriaAdvisor()
         self.aggregator = Aggregator()
+        self.patcher = patch("marketpulse.core.llm_client.LLMClient.analyze_query", return_value=None)
+        self.patcher.start()
+
+    def tearDown(self):
+        self.patcher.stop()
 
     def test_trigkey_green_g4_detection(self):
         prompt = "mini pc trigkey green g4"
